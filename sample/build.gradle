@@ -10,9 +10,6 @@ dependencies {
   implementation rootProject.ext.butterKnifeRuntime
   annotationProcessor rootProject.ext.butterKnifeCompiler
   implementation rootProject.ext.timber
-  implementation rootProject.ext.rxJava
-  implementation rootProject.ext.rxAndroid
-  implementation rootProject.ext.rxBinding
 
   compileOnly rootProject.ext.autoValue
   annotationProcessor rootProject.ext.autoValue

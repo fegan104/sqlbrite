@@ -18,11 +18,10 @@
 package com.squareup.sqlbrite3
 
 import android.database.Cursor
-import android.support.annotation.RequiresApi
 import com.squareup.sqlbrite3.BriteDatabase.Transaction
 import com.squareup.sqlbrite3.SqlBrite.Query
-import io.reactivex.Observable
-import java.util.Optional
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.transform
 
 typealias Mapper<T> = (Cursor) -> T
 
@@ -37,8 +36,23 @@ typealias Mapper<T> = (Cursor) -> T
  *
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
  */
-inline fun <T> Observable<Query>.mapToOne(noinline mapper: Mapper<T>): Observable<T>
-    = lift(Query.mapToOne(mapper))
+inline fun <T> Flow<Query?>.mapToOne(noinline mapper: (Cursor) -> T): Flow<T> {
+    return transform { query ->
+        var item: T? = null
+
+        query?.runQuery()?.use { cursor ->
+            if (cursor.moveToNext()) {
+                item = mapper(cursor)
+                check(!cursor.moveToNext()) { "Cursor returned more than 1 row" }
+            }
+        }
+
+        item?.let {
+            emit(it)
+        }
+    }
+}
+
 
 /**
  * Transforms an observable of single-row [Query] to an observable of `T` using `mapper`
@@ -52,23 +66,20 @@ inline fun <T> Observable<Query>.mapToOne(noinline mapper: Mapper<T>): Observabl
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
  * @param default Value returned if result set is empty
  */
-inline fun <T> Observable<Query>.mapToOneOrDefault(default: T, noinline mapper: Mapper<T>): Observable<T>
-    = lift(Query.mapToOneOrDefault(mapper, default))
+inline fun <T> Flow<Query?>.mapToOneOrDefault(defaultValue: T, noinline mapper: (Cursor) -> T): Flow<T> {
+    return transform { query ->
+        var item: T? = null
 
-/**
- * Transforms an observable of single-row [Query] to an observable of `T` using `mapper.
- *
- * It is an error for a query to pass through this operator with more than 1 row in its result set.
- * Use `LIMIT 1` on the underlying SQL query to prevent this. Result sets with 0 rows emit
- * `default`.
- *
- * This operator ignores null cursors returned from [Query.run].
- *
- * @param mapper Maps the current [Cursor] row to `T`. May not return null.
- */
-@RequiresApi(24)
-inline fun <T> Observable<Query>.mapToOptional(noinline mapper: Mapper<T>): Observable<Optional<T>>
-    = lift(Query.mapToOptional(mapper))
+        query?.runQuery()?.use { cursor ->
+            if (cursor.moveToNext()) {
+                item = mapper(cursor)
+                check(!cursor.moveToNext()) { "Cursor returned more than 1 row" }
+            }
+        }
+
+        emit(item ?: defaultValue)
+    }
+}
 
 /**
  * Transforms an observable of [Query] to `List<T>` using `mapper` for each row.
@@ -81,8 +92,20 @@ inline fun <T> Observable<Query>.mapToOptional(noinline mapper: Mapper<T>): Obse
  *
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
  */
-inline fun <T> Observable<Query>.mapToList(noinline mapper: Mapper<T>): Observable<List<T>>
-    = lift(Query.mapToList(mapper))
+inline fun <T> Flow<Query?>.mapToList(noinline mapper: Mapper<T>): Flow<List<T>> {
+    //TODO Flow<Query?>?
+    return transform { query ->
+        val items = mutableListOf<T>()
+
+        query?.runQuery()?.use { cursor ->
+            while (cursor.moveToNext()) {
+                items += mapper(cursor)
+            }
+        }
+
+        emit(items)
+    }
+}
 
 /**
  * Run the database interactions in `body` inside of a transaction.
@@ -90,16 +113,16 @@ inline fun <T> Observable<Query>.mapToList(noinline mapper: Mapper<T>): Observab
  * @param exclusive Uses [BriteDatabase.newTransaction] if true, otherwise
  * [BriteDatabase.newNonExclusiveTransaction].
  */
-inline fun <T> BriteDatabase.inTransaction(
+suspend inline fun <T> BriteDatabase.inTransaction(
     exclusive: Boolean = true,
     body: BriteDatabase.(Transaction) -> T
 ): T {
-  val transaction = if (exclusive) newTransaction() else newNonExclusiveTransaction()
-  try {
-    val result = body(transaction)
-    transaction.markSuccessful()
-    return result
-  } finally {
-    transaction.end()
-  }
+    val transaction = if (exclusive) newTransaction() else newNonExclusiveTransaction()
+    try {
+        val result = body(transaction)
+        transaction.markSuccessful()
+        return result
+    } finally {
+        transaction.end()
+    }
 }
