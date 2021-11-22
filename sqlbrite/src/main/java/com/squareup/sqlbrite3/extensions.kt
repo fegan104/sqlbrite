@@ -20,8 +20,16 @@ package com.squareup.sqlbrite3
 import android.database.Cursor
 import com.squareup.sqlbrite3.BriteDatabase.Transaction
 import com.squareup.sqlbrite3.SqlBrite.Query
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.ContinuationInterceptor
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 typealias Mapper<T> = (Cursor) -> T
 
@@ -124,5 +132,79 @@ suspend inline fun <T> BriteDatabase.inTransaction(
         return result
     } finally {
         transaction.end()
+    }
+}
+
+internal class TransactionElement(
+    private val transactionThreadControlJob: Job,
+    internal val transactionDispatcher: ContinuationInterceptor
+) : CoroutineContext.Element {
+
+    // Singleton key used to retrieve this context element
+    companion object Key : CoroutineContext.Key<TransactionElement>
+
+    override val key: CoroutineContext.Key<TransactionElement>
+        get() = TransactionElement
+
+    /**
+     * Number of transactions (including nested ones) started with this element.
+     * Call [acquire] to increase the count and [release] to decrease it. If the
+     * count reaches zero when [release] is invoked then the transaction job is
+     * cancelled and the transaction thread is released.
+     */
+    private val referenceCount = AtomicInteger(0)
+
+    fun acquire() {
+        referenceCount.incrementAndGet()
+    }
+
+    fun release() {
+        val count = referenceCount.decrementAndGet()
+        if (count < 0) {
+            throw IllegalStateException(
+                "Transaction was never started or was already released.")
+        } else if (count == 0) {
+            // Cancel the job that controls the transaction thread, causing it
+            // to be released.
+            transactionThreadControlJob.cancel()
+        }
+    }
+}
+
+private suspend fun BriteDatabase.createTransactionContext(): CoroutineContext {
+    val controlJob = Job()
+    val dispatcher = queryExecutor.acquireTransactionThread(controlJob)
+    val transactionElement = TransactionElement(controlJob, dispatcher)
+    val threadLocalElement = suspendingTransactionId.asContextElement(controlJob.hashCode())
+    return dispatcher + transactionElement + threadLocalElement
+}
+
+suspend fun <R> BriteDatabase.withTransaction(
+    block: suspend () -> R
+): R {
+    // Use inherited transaction context if available, this allows nested
+    // suspending transactions.
+    val transactionContext =
+        coroutineContext[TransactionElement]?.transactionDispatcher
+            ?: createTransactionContext()
+    return withContext(transactionContext) {
+        val transactionElement = coroutineContext[TransactionElement]!!
+        transactionElement.acquire()
+        try {
+            this@withTransaction.writableDatabase.beginTransaction()
+            try {
+                // Wrap suspending block in a new scope to wait for any
+                // child coroutine.
+                val result = coroutineScope {
+                    block.invoke()
+                }
+                this@withTransaction.writableDatabase.setTransactionSuccessful()
+                return@withContext result
+            } finally {
+                this@withTransaction.writableDatabase.endTransaction()
+            }
+        } finally {
+            transactionElement.release()
+        }
     }
 }

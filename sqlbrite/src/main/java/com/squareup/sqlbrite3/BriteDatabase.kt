@@ -51,12 +51,14 @@ import java.util.concurrent.TimeUnit
 class BriteDatabase internal constructor(
     private val helper: SupportSQLiteOpenHelper,
     private val logger: SqlBrite.Logger,
-    private val dispatcher: CoroutineDispatcher,
+    val dispatcher: CoroutineDispatcher,
     private val queryTransformer: (Flow<SqlBrite.Query>) -> Flow<SqlBrite.Query>
 ) : Closeable {
 
     // Package-private to avoid synthetic accessor method for 'transaction' instance.
     val transactions = ThreadLocal<SqliteTransaction?>()
+    val suspendingTransactionId = ThreadLocal<Int>()
+
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
     private val transaction: Transaction = object : Transaction {

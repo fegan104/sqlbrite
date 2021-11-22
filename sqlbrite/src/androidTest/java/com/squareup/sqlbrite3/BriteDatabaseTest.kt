@@ -1088,6 +1088,7 @@ class BriteDatabaseTest {
     fun querySubscribedToDuringTransactionThrows() = runBlockingTest {
         val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
         db.newTransaction()
+        Truth.assertThat(db.transactions.get()?.size).isEqualTo(1)
         query.test {
             Truth.assertThat(awaitError())
                 .hasMessageThat()
