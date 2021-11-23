@@ -171,9 +171,9 @@ internal class TransactionElement(
     }
 }
 
-private suspend fun BriteDatabase.createTransactionContext(): CoroutineContext {
+private fun BriteDatabase.createTransactionContext(): CoroutineContext {
     val controlJob = Job()
-    val dispatcher = queryExecutor.acquireTransactionThread(controlJob)
+//    val dispatcher = queryExecutor.acquireTransactionThread(controlJob)
     val transactionElement = TransactionElement(controlJob, dispatcher)
     val threadLocalElement = suspendingTransactionId.asContextElement(controlJob.hashCode())
     return dispatcher + transactionElement + threadLocalElement
@@ -191,17 +191,17 @@ suspend fun <R> BriteDatabase.withTransaction(
         val transactionElement = coroutineContext[TransactionElement]!!
         transactionElement.acquire()
         try {
-            this@withTransaction.writableDatabase.beginTransaction()
+            val transaction = this@withTransaction.newTransaction()
             try {
                 // Wrap suspending block in a new scope to wait for any
                 // child coroutine.
                 val result = coroutineScope {
                     block.invoke()
                 }
-                this@withTransaction.writableDatabase.setTransactionSuccessful()
+                transaction.markSuccessful()
                 return@withContext result
             } finally {
-                this@withTransaction.writableDatabase.endTransaction()
+                transaction.end()
             }
         } finally {
             transactionElement.release()

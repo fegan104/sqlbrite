@@ -29,6 +29,7 @@ import android.os.Build
 import android.support.test.InstrumentationRegistry
 import android.support.test.filters.SdkSuppress
 import android.support.test.runner.AndroidJUnit4
+import android.util.Log
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.coroutineScope
@@ -1071,25 +1072,12 @@ class BriteDatabaseTest {
         }
     }
 
-    //    @Test
-    //    fun querySubscribedToDuringTransactionThrows() = runBlockingTest {
-    //        flow {
-    //            emit(db.newTransaction()) //TODO make this work
-    //        }.onEach {
-    //            db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-    //        }.test {
-    //            Truth.assertThat(awaitError())
-    //                .hasMessageThat()
-    //                .contains("Cannot create observable query in transaction")
-    //            //Cannot subscribe to observable query in a transaction.
-    //        }
-    //    }
     @Test
     fun querySubscribedToDuringTransactionThrows() = runBlockingTest {
         val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
         db.newTransaction()
-        Truth.assertThat(db.transactions.get()?.size).isEqualTo(1)
         query.test {
+            awaitItem()
             Truth.assertThat(awaitError())
                 .hasMessageThat()
                 .contains("Cannot subscribe to observable query in a transaction.")
