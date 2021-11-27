@@ -31,10 +31,12 @@ import kotlinx.coroutines.test.runBlockingTest
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Test
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
 
 class QueryTest {
 
-    private var db: BriteDatabase? = null
+    private lateinit var db: BriteDatabase
 
     @Before
     fun setUp() {
@@ -45,12 +47,13 @@ class QueryTest {
         val helper = factory.create(configuration)
         val sqlBrite = SqlBrite.Builder().build()
         val dispatcher = TestCoroutineDispatcher()
-        db = sqlBrite.wrapDatabaseHelper(helper, dispatcher)
+        val executor = Executors.newSingleThreadExecutor()
+        db = sqlBrite.wrapDatabaseHelper(helper, dispatcher, executor)
     }
 
     @Test
     fun mapToOne() = runBlockingTest {
-        val employees: Employee = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
+        val employees: Employee = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
             .mapToOne { Employee.MAPPER(it) }
             .first()
         Truth.assertThat(employees).isEqualTo(Employee("alice", "Alice Allison"))
@@ -58,7 +61,7 @@ class QueryTest {
 
     @Test
     fun mapToOneThrowsOnMultipleRows() = runBlockingTest {
-        val employees: Flow<Employee> = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 2") //
+        val employees: Flow<Employee> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 2") //
             .mapToOne { Employee.MAPPER(it) }
         try {
             employees.first()
@@ -70,7 +73,7 @@ class QueryTest {
 
     @Test
     fun mapToOneOrDefault() = runBlockingTest {
-        val employees: Employee = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
+        val employees: Employee = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
             .mapToOneOrDefault(Employee("fred", "Fred Frederson")) { Employee.MAPPER(it) }
             .first()
         Truth.assertThat(employees).isEqualTo(Employee("alice", "Alice Allison"))
@@ -78,7 +81,7 @@ class QueryTest {
 
     @Test
     fun mapToOneOrDefaultThrowsOnMultipleRows() = runBlockingTest {
-        val employees: Flow<Employee> = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 2") //
+        val employees: Flow<Employee> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 2") //
             .mapToOneOrDefault(Employee("fred", "Fred Frederson")) {
                 Employee.MAPPER(it)
             }
@@ -92,7 +95,7 @@ class QueryTest {
 
     @Test
     fun mapToList() = runBlockingTest {
-        val employees: List<Employee> = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+        val employees: List<Employee> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
             .mapToList(Employee.MAPPER)
             .first()
         Truth.assertThat(employees).containsExactly( //
@@ -104,7 +107,7 @@ class QueryTest {
 
     @Test
     fun mapToListEmptyWhenNoRows() = runBlockingTest {
-        val employees: List<Employee?> = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " WHERE 1=2")
+        val employees: List<Employee?> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " WHERE 1=2")
             .mapToList(Employee.MAPPER)
             .first()
         Truth.assertThat(employees).isEmpty()
@@ -118,7 +121,7 @@ class QueryTest {
             if (count++ == 2) null else Employee.MAPPER(cursor)
         }
 
-        val employees: List<Employee?> = db!!.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES) //
+        val employees: List<Employee?> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES) //
             .mapToList(mapToNull)
             .first()
         Truth.assertThat(employees).containsExactly(

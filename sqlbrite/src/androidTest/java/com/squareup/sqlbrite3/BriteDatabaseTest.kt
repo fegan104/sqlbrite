@@ -29,16 +29,17 @@ import android.os.Build
 import android.support.test.InstrumentationRegistry
 import android.support.test.filters.SdkSuppress
 import android.support.test.runner.AndroidJUnit4
-import android.util.Log
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineDispatcher
 import kotlinx.coroutines.test.runBlockingTest
 import org.junit.Assert
@@ -49,9 +50,14 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import java.io.Closeable
 import java.io.IOException
+import java.lang.Thread.sleep
 import java.util.ArrayList
 import java.util.Arrays
 import java.util.Collections
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+
 
 @RunWith(AndroidJUnit4::class) //
 class BriteDatabaseTest {
@@ -84,7 +90,8 @@ class BriteDatabaseTest {
             }
         }
 
-        db = BriteDatabase(helper, logger, dispatcher) { upstream ->
+
+        db = BriteDatabase(helper, logger, dispatcher, Executors.newSingleThreadExecutor()) { upstream ->
             upstream.takeWhile { killSwitch }
         }
     }
@@ -988,6 +995,28 @@ class BriteDatabaseTest {
     }
 
     @Test
+    fun transactionOnlyNotifiesOnceWithCoroutines() = runBlocking {
+        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+            awaitItem().runQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .isExhausted()
+            db.withTransaction {
+                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+            }
+            awaitItem().runQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .hasRow("john", "John Johnson")
+                .hasRow("nick", "Nick Nickers")
+                .isExhausted()
+        }
+    }
+
+    @Test
     fun transactionCreatedFromTransactionNotificationWorks() = runBlockingTest {
         // Tests the case where a transaction is created in the subscriber to a query which gets
         // notified as the result of another transaction being committed. With improper ordering, this
@@ -1001,7 +1030,6 @@ class BriteDatabaseTest {
             } finally {
                 transaction.end()
             }
-            //TODO why are there two emissions
             awaitItem()
             awaitItem()
         }
@@ -1018,12 +1046,10 @@ class BriteDatabaseTest {
                 .isExhausted()
             val transaction = db.newTransaction()
             val closeableTransaction: Closeable = transaction // Verify type is implemented.
-            try {
+            closeableTransaction.use {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
                 transaction.markSuccessful()
-            } finally {
-                closeableTransaction.close()
             }
             awaitItem().runQuery()
                 .hasRow("alice", "Alice Allison")
@@ -1062,6 +1088,28 @@ class BriteDatabaseTest {
     }
 
     @Test
+    fun coroutineTransactionDoesNotThrow() = runBlocking {
+        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+            awaitItem().runQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .isExhausted()
+            db.withTransaction {
+                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+            }
+            awaitItem().runQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .hasRow("john", "John Johnson")
+                .hasRow("nick", "Nick Nickers")
+                .isExhausted()
+        }
+    }
+
+    @Test
     fun queryCreatedDuringTransactionThrows() {
         db.newTransaction()
         try {
@@ -1069,6 +1117,18 @@ class BriteDatabaseTest {
             Assert.fail()
         } catch (e: IllegalStateException) {
             Truth.assertThat(e.message).startsWith("Cannot create observable query in transaction.")
+        }
+    }
+
+    @Test
+    fun queryCreatedDuringWithTransactionThrows() = runBlocking {
+        db.withTransaction {
+            try {
+                db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+                Assert.fail()
+            } catch (e: IllegalStateException) {
+                Truth.assertThat(e.message).startsWith("Cannot create observable query in transaction.")
+            }
         }
     }
 
@@ -1085,6 +1145,19 @@ class BriteDatabaseTest {
     }
 
     @Test
+    fun querySubscribedToDuringWithTransactionThrows() = runBlocking {
+        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+        db.withTransaction {
+            query.test {
+                awaitItem()
+                Truth.assertThat(awaitError())
+                    .hasMessageThat()
+                    .contains("Cannot subscribe to observable query in a transaction.")
+            }
+        }
+    }
+
+    @Test
     fun callingEndMultipleTimesThrows() = runBlockingTest {
         val transaction = db.newTransaction()
         transaction.end()
@@ -1096,28 +1169,26 @@ class BriteDatabaseTest {
         }
     }
 
-    //    @Test //TODO fix this
-    //    @Throws(InterruptedException::class)
-    //    fun querySubscribedToDuringTransactionOnDifferentThread() = runBlockingTest {
-    //        val transaction = db.newTransaction()
-    //        val latch = CountDownLatch(1)
-    //
-    //        object : Thread() {
-    //            override fun run() = runBlockingTest {
-    //                db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-    //                    sleep(500) // Wait for the thread to block on initial query.
-    //                    transaction.end() // Allow other queries to continue.
-    //                    latch.await(500, TimeUnit.MILLISECONDS) // Wait for thread to observe initial query.
-    //                    awaitItem().runQuery()
-    //                        .hasRow("alice", "Alice Allison")
-    //                        .hasRow("bob", "Bob Bobberson")
-    //                        .hasRow("eve", "Eve Evenson")
-    //                        .isExhausted()
-    //                }
-    //                latch.countDown()
-    //            }
-    //        }.start()
-    //    }
+    @Test
+    fun querySubscribedToDuringTransactionOnDifferentThread() {
+        val transaction = db.newTransaction()
+        val latch = CountDownLatch(1)
+        object : Thread() {
+            override fun run() = runBlocking {
+                db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+                    awaitItem().runQuery()
+                        .hasRow("alice", "Alice Allison")
+                        .hasRow("bob", "Bob Bobberson")
+                        .hasRow("eve", "Eve Evenson")
+                        .isExhausted()
+                }
+                latch.countDown()
+            }
+        }.start()
+        sleep(500) // Wait for the thread to block on initial query.
+        transaction.end() // Allow other queries to continue.
+        latch.await(500, TimeUnit.MILLISECONDS) // Wait for thread to observe initial query.
+    }
 
     @Test
     fun queryCreatedBeforeTransactionButSubscribedAfter() = runBlockingTest {
@@ -1129,6 +1200,24 @@ class BriteDatabaseTest {
             transaction.markSuccessful()
         } finally {
             transaction.end()
+        }
+        query.test {
+            awaitItem().runQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .hasRow("john", "John Johnson")
+                .hasRow("nick", "Nick Nickers")
+                .isExhausted()
+        }
+    }
+
+    @Test
+    fun queryCreatedBeforeWithTransactionButSubscribedAfter() = runBlocking {
+        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+        db.withTransaction {
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
         }
         query.test {
             awaitItem().runQuery()

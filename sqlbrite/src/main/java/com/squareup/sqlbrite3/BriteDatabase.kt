@@ -27,23 +27,24 @@ import android.database.sqlite.SQLiteTransactionListener
 import android.support.annotation.CheckResult
 import android.support.annotation.IntDef
 import android.support.annotation.WorkerThread
-import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.onSubscription
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import java.io.Closeable
-import java.lang.IllegalStateException
 import java.util.Arrays
 import java.util.LinkedHashSet
+import java.util.concurrent.Executor
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
+import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * A lightweight wrapper around [SupportSQLiteOpenHelper] which allows for continuously
@@ -52,31 +53,33 @@ import java.util.concurrent.TimeUnit
 class BriteDatabase internal constructor(
     private val helper: SupportSQLiteOpenHelper,
     private val logger: SqlBrite.Logger,
-    val dispatcher: CoroutineDispatcher,
+    private val dispatcher: CoroutineDispatcher,
+    val transactionExecutor: Executor = defaultTransactionExecutor(),
     private val queryTransformer: (Flow<SqlBrite.Query>) -> Flow<SqlBrite.Query>
 ) : Closeable {
 
     // Package-private to avoid synthetic accessor method for 'transaction' instance.
     val transactions = ThreadLocal<SqliteTransaction?>()
-    val suspendingTransactionId = ThreadLocal<Int>()
+    //    val transactionDispatcher = newSingleThreadContext("transactions")
+
 
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
-    private val transaction: Transaction = object : Transaction {
-        override suspend fun markSuccessful() = withContext(dispatcher) {
+    val transaction: Transaction = object : Transaction {
+        override fun markSuccessful() {
             if (logging) log("TXN SUCCESS %s", transactions.get())
             writableDatabase.setTransactionSuccessful()
         }
 
-        override suspend fun yieldIfContendedSafely(): Boolean = withContext(dispatcher) {
-            writableDatabase.yieldIfContendedSafely()
+        override fun yieldIfContendedSafely(): Boolean {
+            return writableDatabase.yieldIfContendedSafely()
         }
 
-        override suspend fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean = withContext(dispatcher) {
-            writableDatabase.yieldIfContendedSafely(sleepUnit.toMillis(sleepAmount))
+        override fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean {
+            return writableDatabase.yieldIfContendedSafely(sleepUnit.toMillis(sleepAmount))
         }
 
-        override suspend fun end() = withContext(dispatcher) {
+        override fun end() {
             val transaction: SqliteTransaction = transactions.get() ?: throw IllegalStateException("Not in transaction.")
             val newTransaction = transaction.parent
             transactions.set(newTransaction)
@@ -88,7 +91,7 @@ class BriteDatabase internal constructor(
             }
         }
 
-        override fun close() = runBlocking {
+        override fun close() {
             end()
         }
     }
@@ -648,6 +651,12 @@ class BriteDatabase internal constructor(
         return@withContext rowId
     }
 
+
+    fun inSuspendingTransaction(): Boolean {
+        return writableDatabase.inTransaction() || transactions.get() != null
+    }
+
+
     /** An in-progress database transaction.  */
     interface Transaction : Closeable {
 
@@ -658,7 +667,7 @@ class BriteDatabase internal constructor(
          * @see SupportSQLiteDatabase.endTransaction
          */
         @WorkerThread
-        suspend fun end()
+        fun end()
 
         /**
          * Marks the current transaction as successful. Do not do any more database work between
@@ -669,7 +678,7 @@ class BriteDatabase internal constructor(
          * @see SupportSQLiteDatabase.setTransactionSuccessful
          */
         @WorkerThread
-        suspend fun markSuccessful()
+        fun markSuccessful()
 
         /**
          * Temporarily end the transaction to let other threads run. The transaction is assumed to be
@@ -683,7 +692,7 @@ class BriteDatabase internal constructor(
          * @see SupportSQLiteDatabase.yieldIfContendedSafely
          */
         @WorkerThread
-        suspend fun yieldIfContendedSafely(): Boolean
+        fun yieldIfContendedSafely(): Boolean
 
         /**
          * Temporarily end the transaction to let other threads run. The transaction is assumed to be
@@ -700,7 +709,7 @@ class BriteDatabase internal constructor(
          * @see SupportSQLiteDatabase.yieldIfContendedSafely
          */
         @WorkerThread
-        suspend fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean
+        fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean
 
         /**
          * Equivalent to calling [.end]
@@ -786,5 +795,15 @@ class BriteDatabase internal constructor(
                 else -> "unknown ($conflictAlgorithm)"
             }
         }
+
+        private fun defaultTransactionExecutor(): ExecutorService = Executors.newFixedThreadPool(4, object : ThreadFactory {
+            private val THREAD_NAME_STEM = "arch_disk_io_%d"
+            private val mThreadId: AtomicInteger = AtomicInteger(0)
+            override fun newThread(r: Runnable?): Thread {
+                return Thread(r).apply {
+                    name = THREAD_NAME_STEM.format(mThreadId.getAndIncrement())
+                }
+            }
+        })
     }
 }

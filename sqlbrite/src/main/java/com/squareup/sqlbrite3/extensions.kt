@@ -25,11 +25,16 @@ import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.transform
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import java.util.concurrent.Executor
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
+import kotlin.coroutines.resume
 
 typealias Mapper<T> = (Cursor) -> T
 
@@ -171,12 +176,51 @@ internal class TransactionElement(
     }
 }
 
-private fun BriteDatabase.createTransactionContext(): CoroutineContext {
+private suspend fun BriteDatabase.createTransactionContext(transaction: BriteDatabase.SqliteTransaction): CoroutineContext {
     val controlJob = Job()
-//    val dispatcher = queryExecutor.acquireTransactionThread(controlJob)
+    val dispatcher = transactionExecutor.acquireTransactionThread(controlJob)
     val transactionElement = TransactionElement(controlJob, dispatcher)
-    val threadLocalElement = suspendingTransactionId.asContextElement(controlJob.hashCode())
+    val threadLocalElement = transactions.asContextElement(transaction)
     return dispatcher + transactionElement + threadLocalElement
+}
+
+/**
+ * Prepares and returns a [ContinuationInterceptor] to dispatch coroutines to
+ * an acquired thread used to perform transaction work. The [controlJob] is used
+ * to control the release of the thread by cancelling the job.
+ */
+private suspend fun Executor.acquireTransactionThread(
+    controlJob: Job
+): ContinuationInterceptor = suspendCancellableCoroutine { continuation ->
+    continuation.invokeOnCancellation {
+        // We got cancelled while waiting to acquire a thread, we can't stop our
+        // attempt to acquire a thread, but we can cancel the controlling job so
+        // once it gets acquired it is quickly released.
+        controlJob.cancel()
+    }
+    try {
+        execute {
+            // runBlocking creates an event loop that executes coroutine blocks.
+            runBlocking {
+                // Thread acquired, resume suspendCancellableCoroutine by returning
+                // the interceptor created by runBlocking. The interceptor will be
+                // used to intercept and dispatch continuation blocks into the
+                // acquired thread.
+                continuation.resume(coroutineContext[ContinuationInterceptor]!!)
+
+                // Suspend this runBlocking coroutine until control job is
+                // completed. This prevents runBlocking from immediately completing
+                // since the body of this coroutine is empty.
+                controlJob.join()
+            }
+        }
+    } catch (ex: RejectedExecutionException) {
+        // Couldn't acquire a thread, cancel coroutine.
+        continuation.cancel(
+            IllegalStateException(
+                "Unable to acquire a thread to perform the transaction.", ex)
+        )
+    }
 }
 
 suspend fun <R> BriteDatabase.withTransaction(
@@ -184,24 +228,26 @@ suspend fun <R> BriteDatabase.withTransaction(
 ): R {
     // Use inherited transaction context if available, this allows nested
     // suspending transactions.
+    val transaction = BriteDatabase.SqliteTransaction(transactions.get())
     val transactionContext =
         coroutineContext[TransactionElement]?.transactionDispatcher
-            ?: createTransactionContext()
+            ?: createTransactionContext(transaction)
     return withContext(transactionContext) {
         val transactionElement = coroutineContext[TransactionElement]!!
         transactionElement.acquire()
         try {
-            val transaction = this@withTransaction.newTransaction()
+            if (logging) log("TXN BEGIN %s", transaction)
+            writableDatabase.beginTransactionWithListener(transaction)
             try {
                 // Wrap suspending block in a new scope to wait for any
                 // child coroutine.
                 val result = coroutineScope {
                     block.invoke()
                 }
-                transaction.markSuccessful()
+                this@withTransaction.transaction.markSuccessful()
                 return@withContext result
             } finally {
-                transaction.end()
+                this@withTransaction.transaction.end()
             }
         } finally {
             transactionElement.release()

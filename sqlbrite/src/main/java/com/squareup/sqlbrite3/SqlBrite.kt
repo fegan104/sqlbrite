@@ -25,6 +25,7 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import java.util.concurrent.Executor
 
 /**
  * A lightweight wrapper around [SupportSQLiteOpenHelper] which allows for continuously
@@ -72,9 +73,14 @@ class SqlBrite internal constructor(
     @CheckResult
     fun wrapDatabaseHelper(
         helper: SupportSQLiteOpenHelper,
-        dispatcher: CoroutineDispatcher
+        dispatcher: CoroutineDispatcher,
+        transactionExecutor: Executor? = null
     ): BriteDatabase {
-        return BriteDatabase(helper, logger, dispatcher, queryTransformer)
+        return if (transactionExecutor == null) {
+            BriteDatabase(helper, logger, dispatcher, queryTransformer = queryTransformer)
+        } else {
+            BriteDatabase(helper, logger, dispatcher, transactionExecutor, queryTransformer)
+        }
     }
 
     /**
