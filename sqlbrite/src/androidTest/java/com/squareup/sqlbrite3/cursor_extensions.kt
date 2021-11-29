@@ -1,6 +1,7 @@
 package com.squareup.sqlbrite3
 
 import android.database.Cursor
+import app.cash.turbine.FlowTurbine
 import com.google.common.truth.Truth
 import java.lang.AssertionError
 import java.lang.StringBuilder
@@ -28,4 +29,8 @@ fun Cursor.isExhausted() {
         throw AssertionError("Expected no more rows but was: $data")
     }
     close()
+}
+
+suspend fun <Q: SqlBrite.Query> FlowTurbine<Q>.awaitItemAndRunQuery(): Cursor {
+    return awaitItem().runQuery()!!
 }

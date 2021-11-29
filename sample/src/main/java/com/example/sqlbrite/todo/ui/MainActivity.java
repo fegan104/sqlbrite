@@ -16,9 +16,13 @@
 package com.example.sqlbrite.todo.ui;
 
 import android.os.Bundle;
-import android.support.v4.app.FragmentActivity;
+
 import com.example.sqlbrite.todo.R;
 
+import androidx.fragment.app.FragmentActivity;
+import dagger.hilt.android.AndroidEntryPoint;
+
+@AndroidEntryPoint
 public final class MainActivity extends FragmentActivity
     implements ListsFragment.Listener, ItemsFragment.Listener {
 

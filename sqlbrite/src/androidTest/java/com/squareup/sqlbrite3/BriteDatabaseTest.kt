@@ -32,7 +32,6 @@ import android.support.test.runner.AndroidJUnit4
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -84,12 +83,7 @@ class BriteDatabaseTest {
         val factory: SupportSQLiteOpenHelper.Factory = FrameworkSQLiteOpenHelperFactory()
         val helper: SupportSQLiteOpenHelper = factory.create(configuration)
         real = helper.writableDatabase
-        val logger: SqlBrite.Logger = object : SqlBrite.Logger {
-            override fun log(message: String?) {
-                logs.add(message)
-            }
-        }
-
+        val logger: SqlBrite.Logger = SqlBrite.Logger { message -> logs.add(message) }
 
         db = BriteDatabase(helper, logger, dispatcher, Executors.newSingleThreadExecutor()) { upstream ->
             upstream.takeWhile { killSwitch }
@@ -97,14 +91,14 @@ class BriteDatabaseTest {
     }
 
     @Test
-    fun loggerEnabled() {
+    fun loggerEnabled() = runBlockingTest {
         db.setLoggingEnabled(true)
         db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
         Truth.assertThat(logs).isNotEmpty()
     }
 
     @Test
-    fun loggerDisabled() {
+    fun loggerDisabled() = runBlockingTest {
         db.setLoggingEnabled(false)
         db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
         Truth.assertThat(logs).isEmpty()
@@ -114,7 +108,7 @@ class BriteDatabaseTest {
     fun loggerIndentsSqlForCreateQuery() = runBlockingTest {
         db.setLoggingEnabled(true)
         db.createQuery(TestDb.TABLE_EMPLOYEE, "SELECT\n1").test {
-            awaitItem().runQuery().close()
+            awaitItemAndRunQuery().close()
             Truth.assertThat(logs).containsExactly(
                 """QUERY
   tables: [employee]
@@ -137,7 +131,7 @@ class BriteDatabaseTest {
     }
 
     @Test
-    fun loggerIndentsSqlForExecute() {
+    fun loggerIndentsSqlForExecute() = runBlockingTest {
         db.setLoggingEnabled(true)
         db.execute("PRAGMA\ncompile_options")
         Truth.assertThat(logs).containsExactly(
@@ -148,7 +142,7 @@ class BriteDatabaseTest {
     }
 
     @Test
-    fun loggerIndentsSqlForExecuteWithArgs() {
+    fun loggerIndentsSqlForExecuteWithArgs() = runBlockingTest {
         db.setLoggingEnabled(true)
         db.execute("PRAGMA\ncompile_options", *arrayOfNulls<Any>(0))
         Truth.assertThat(logs).containsExactly(
@@ -168,7 +162,7 @@ class BriteDatabaseTest {
     @Test
     fun query() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -179,7 +173,7 @@ class BriteDatabaseTest {
     @Test
     fun queryWithQueryObject() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, SimpleSQLiteQuery(TestDb.SELECT_EMPLOYEES)).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -229,7 +223,7 @@ class BriteDatabaseTest {
         db.createQuery(
             TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " WHERE " + TestDb.EmployeeTable.USERNAME + " = ?", "bob"
         ).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("bob", "Bob Bobberson")
                 .isExhausted()
         }
@@ -238,13 +232,13 @@ class BriteDatabaseTest {
     @Test
     fun queryObservesInsert() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -257,14 +251,14 @@ class BriteDatabaseTest {
     @Test
     fun queryInitialValueAndTriggerUsesScheduler() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
 
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -276,7 +270,7 @@ class BriteDatabaseTest {
     @Test
     fun queryNotNotifiedWhenInsertFails() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -288,7 +282,7 @@ class BriteDatabaseTest {
     @Test
     fun queryNotNotifiedWhenQueryTransformerUnsubscribes() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -302,7 +296,7 @@ class BriteDatabaseTest {
     @Test
     fun queryObservesUpdate() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -310,7 +304,7 @@ class BriteDatabaseTest {
             val values = ContentValues()
             values.put(TestDb.EmployeeTable.NAME, "Robert Bobberson")
             db.update(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, values, TestDb.EmployeeTable.USERNAME + " = 'bob'")
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Robert Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -321,7 +315,7 @@ class BriteDatabaseTest {
     @Test
     fun queryNotNotifiedWhenUpdateAffectsZeroRows() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -335,13 +329,13 @@ class BriteDatabaseTest {
     @Test
     fun queryObservesDelete() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.delete(TestDb.TABLE_EMPLOYEE, TestDb.EmployeeTable.USERNAME + " = 'bob'")
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
@@ -351,7 +345,7 @@ class BriteDatabaseTest {
     @Test
     fun queryNotNotifiedWhenDeleteAffectsZeroRows() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -363,7 +357,7 @@ class BriteDatabaseTest {
     @Test
     fun queryMultipleTables() = runBlockingTest {
         db.createQuery(TestDb.BOTH_TABLES, TestDb.SELECT_MANAGER_LIST).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
         }
@@ -372,7 +366,7 @@ class BriteDatabaseTest {
     @Test
     fun queryMultipleTablesWithQueryObject() = runBlockingTest {
         db.createQuery(TestDb.BOTH_TABLES, SimpleSQLiteQuery(TestDb.SELECT_MANAGER_LIST)).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
         }
@@ -381,19 +375,19 @@ class BriteDatabaseTest {
     @Test
     fun queryMultipleTablesObservesChanges() = runBlockingTest {
         db.createQuery(TestDb.BOTH_TABLES, TestDb.SELECT_MANAGER_LIST).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
 
             // A new employee triggers, despite the fact that it's not in our result set.
             db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
 
             // A new manager also triggers and it is in our result set.
             db.insert(TestDb.TABLE_MANAGER, SQLiteDatabase.CONFLICT_NONE, TestDb.manager(testDb.bobId, testDb.eveId))
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .hasRow("Bob Bobberson", "Eve Evenson")
                 .isExhausted()
@@ -405,63 +399,58 @@ class BriteDatabaseTest {
         // Employee table is in this list twice. We should still only be notified once for a change.
         val tables = Arrays.asList(TestDb.TABLE_EMPLOYEE, TestDb.TABLE_MANAGER, TestDb.TABLE_EMPLOYEE)
         db.createQuery(tables, TestDb.SELECT_MANAGER_LIST).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
 
             val values = ContentValues()
             values.put(TestDb.EmployeeTable.NAME, "Even Evenson")
             db.update(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, values, TestDb.EmployeeTable.USERNAME + " = 'eve'")
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Even Evenson", "Alice Allison")
                 .isExhausted()
         }
     }
 
-    //    @Test
-    //    fun queryNotNotifiedAfterDispose() = runBlockingTest {
-    //        coroutineScope {
-    //            var queryFlow: Flow<SqlBrite.Query>? = null
-    //            val job = launch {
-    //                queryFlow = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-    //                queryFlow!!.test {
-    //                    awaitItem().runQuery()
+    @Test
+    fun queryNotNotifiedAfterDispose() = runBlockingTest {
+        coroutineScope {
+            val queryCollector = launch {
+                db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+                    awaitItemAndRunQuery()
+                        .hasRow("alice", "Alice Allison")
+                        .hasRow("bob", "Bob Bobberson")
+                        .hasRow("eve", "Eve Evenson")
+                        .isExhausted()
+                }
+            }
+            queryCollector.cancel()
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+        }
+    }
+
+    //            @Test TODO
+    //            fun queryOnlyNotifiedAfterCollect() = runBlockingTest {
+    //                val query: Flow<SqlBrite.Query> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+    //                query.test { }
+    //                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+    //                query.test { }
+    //                query.test {
+    //                    awaitItemAndRunQuery()
     //                        .hasRow("alice", "Alice Allison")
     //                        .hasRow("bob", "Bob Bobberson")
     //                        .hasRow("eve", "Eve Evenson")
+    //                        .hasRow("john", "John Johnson")
     //                        .isExhausted()
     //                }
     //            }
-    //            job.cancel()
-    //            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-    //            queryFlow!!.test {
-    //                awaitComplete()
-    //            }
-    //        }
-    //    }
-    //
-    //        @Test
-    //        fun queryOnlyNotifiedAfterSubscribe() = runBlockingTest {
-    //            val query: Flow<SqlBrite.Query> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-    //            query.test { }
-    //            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-    //            query.test { }
-    //            query.test {
-    //                awaitItem().runQuery()
-    //                    .hasRow("alice", "Alice Allison")
-    //                    .hasRow("bob", "Bob Bobberson")
-    //                    .hasRow("eve", "Eve Evenson")
-    //                    .hasRow("john", "John Johnson")
-    //                    .isExhausted()
-    //            }
-    //        }
 
     @Test
     fun executeSqlNoTrigger() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
             .drop(1) // Skip initial
             .test {
-                db.execute("UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = 'Zach'")
+                db.execute("UPDATE ${TestDb.TABLE_EMPLOYEE} SET ${TestDb.EmployeeTable.NAME} = 'Zach'")
             }
     }
 
@@ -477,7 +466,7 @@ class BriteDatabaseTest {
     @Test
     fun executeSqlAndTrigger() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -486,7 +475,7 @@ class BriteDatabaseTest {
                 TestDb.TABLE_EMPLOYEE,
                 "UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = 'Zach'"
             )
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Zach")
                 .hasRow("bob", "Zach")
                 .hasRow("eve", "Zach")
@@ -502,7 +491,7 @@ class BriteDatabaseTest {
             launch {
                 managerFlow = db.createQuery(TestDb.TABLE_MANAGER, TestDb.SELECT_MANAGER_LIST)
                 managerFlow!!.test {
-                    awaitItem().runQuery()
+                    awaitItemAndRunQuery()
                         .hasRow("Eve Evenson", "Alice Allison")
                         .isExhausted()
                 }
@@ -510,7 +499,7 @@ class BriteDatabaseTest {
             launch {
                 employeeFlow = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
                 employeeFlow!!.test {
-                    awaitItem().runQuery()
+                    awaitItemAndRunQuery()
                         .hasRow("alice", "Alice Allison")
                         .hasRow("bob", "Bob Bobberson")
                         .hasRow("eve", "Eve Evenson")
@@ -523,12 +512,12 @@ class BriteDatabaseTest {
                 "UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = 'Zach'"
             )
             managerFlow!!.test {
-                awaitItem().runQuery()
+                awaitItemAndRunQuery()
                     .hasRow("Zach", "Zach")
                     .isExhausted()
             }
             employeeFlow!!.test {
-                awaitItem().runQuery()
+                awaitItemAndRunQuery()
                     .hasRow("alice", "Zach")
                     .hasRow("bob", "Zach")
                     .hasRow("eve", "Zach")
@@ -540,7 +529,7 @@ class BriteDatabaseTest {
     @Test
     fun executeSqlAndTriggerWithNoTables() = runBlockingTest {
         db.createQuery(TestDb.TABLE_MANAGER, TestDb.SELECT_MANAGER_LIST).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
             db.executeAndTrigger(
@@ -568,7 +557,7 @@ class BriteDatabaseTest {
     @Test
     fun executeSqlWithArgsAndTrigger() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -577,7 +566,7 @@ class BriteDatabaseTest {
                 TestDb.TABLE_EMPLOYEE,
                 "UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = ?", "Zach"
             )
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Zach")
                 .hasRow("bob", "Zach")
                 .hasRow("eve", "Zach")
@@ -604,14 +593,14 @@ class BriteDatabaseTest {
     fun executeSqlWithArgsAndTriggerWithMultipleTables() = runBlockingTest {
         val managerFlow = db.createQuery(TestDb.TABLE_MANAGER, TestDb.SELECT_MANAGER_LIST)
         managerFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
         }
 
         val employeeFlow = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
         employeeFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -623,12 +612,12 @@ class BriteDatabaseTest {
             "UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = ?", "Zach"
         )
         managerFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Zach", "Zach")
                 .isExhausted()
         }
         employeeFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Zach")
                 .hasRow("bob", "Zach")
                 .hasRow("eve", "Zach")
@@ -640,7 +629,7 @@ class BriteDatabaseTest {
     @Test
     fun executeSqlWithArgsAndTriggerWithNoTables() = runBlockingTest {
         db.createQuery(TestDb.BOTH_TABLES, TestDb.SELECT_MANAGER_LIST).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
             db.executeAndTrigger(
@@ -658,13 +647,13 @@ class BriteDatabaseTest {
                 + "VALUES ('Chad Chadson', 'chad')"
         )
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.executeInsert(TestDb.TABLE_EMPLOYEE, statement)
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -682,7 +671,7 @@ class BriteDatabaseTest {
                 + "VALUES ('Alice Allison', 'alice')"
         )
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -700,13 +689,13 @@ class BriteDatabaseTest {
         )
         val managerObserver = db.createQuery(TestDb.TABLE_MANAGER, TestDb.SELECT_MANAGER_LIST)
         managerObserver.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
         }
         val employeeFlow = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
         employeeFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -719,12 +708,12 @@ class BriteDatabaseTest {
         )
         db.executeInsert(employeeAndManagerTables, statement)
         managerObserver.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
         }
         employeeFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -741,7 +730,7 @@ class BriteDatabaseTest {
                 + "VALUES ('Chad Chadson', 'chad')"
         )
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -777,13 +766,13 @@ class BriteDatabaseTest {
         statement.bindString(1, "Chad Chadson")
         statement.bindString(2, "chad")
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.executeInsert(TestDb.TABLE_EMPLOYEE, statement)
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -820,13 +809,13 @@ class BriteDatabaseTest {
             "UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = 'Zach'"
         )
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.executeUpdateDelete(TestDb.TABLE_EMPLOYEE, statement)
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Zach")
                 .hasRow("bob", "Zach")
                 .hasRow("eve", "Zach")
@@ -845,7 +834,7 @@ class BriteDatabaseTest {
                 + " WHERE " + TestDb.EmployeeTable.NAME + " = 'Rob'"
         )
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -863,13 +852,13 @@ class BriteDatabaseTest {
         )
         val managerObserver = db.createQuery(TestDb.TABLE_MANAGER, TestDb.SELECT_MANAGER_LIST)
         managerObserver.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
         }
         val employeeFlow = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
         employeeFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -878,14 +867,14 @@ class BriteDatabaseTest {
         val employeeAndManagerTables = Collections.unmodifiableSet(HashSet(TestDb.BOTH_TABLES))
         db.executeUpdateDelete(employeeAndManagerTables, statement)
         employeeFlow.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Zach")
                 .hasRow("bob", "Zach")
                 .hasRow("eve", "Zach")
                 .isExhausted()
         }
         managerObserver.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Zach", "Zach")
                 .isExhausted()
         }
@@ -899,7 +888,7 @@ class BriteDatabaseTest {
             "UPDATE " + TestDb.TABLE_EMPLOYEE + " SET " + TestDb.EmployeeTable.NAME + " = 'Zach'"
         )
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -935,13 +924,13 @@ class BriteDatabaseTest {
         )
         statement.bindString(1, "Zach")
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             db.executeUpdateDelete(TestDb.TABLE_EMPLOYEE, statement)
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Zach")
                 .hasRow("bob", "Zach")
                 .hasRow("eve", "Zach")
@@ -971,7 +960,7 @@ class BriteDatabaseTest {
     @Test
     fun transactionOnlyNotifiesOnce() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -984,7 +973,7 @@ class BriteDatabaseTest {
             } finally {
                 transaction.end()
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -997,7 +986,7 @@ class BriteDatabaseTest {
     @Test
     fun transactionOnlyNotifiesOnceWithCoroutines() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1006,7 +995,7 @@ class BriteDatabaseTest {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1039,7 +1028,7 @@ class BriteDatabaseTest {
     @Throws(IOException::class)
     fun transactionIsCloseable() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1051,7 +1040,7 @@ class BriteDatabaseTest {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
                 transaction.markSuccessful()
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1064,7 +1053,7 @@ class BriteDatabaseTest {
     @Test
     fun transactionDoesNotThrow() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1077,7 +1066,7 @@ class BriteDatabaseTest {
             } finally {
                 transaction.close() // Transactions should not throw on close().
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1090,7 +1079,7 @@ class BriteDatabaseTest {
     @Test
     fun coroutineTransactionDoesNotThrow() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1099,7 +1088,7 @@ class BriteDatabaseTest {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1176,7 +1165,7 @@ class BriteDatabaseTest {
         object : Thread() {
             override fun run() = runBlocking {
                 db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-                    awaitItem().runQuery()
+                    awaitItemAndRunQuery()
                         .hasRow("alice", "Alice Allison")
                         .hasRow("bob", "Bob Bobberson")
                         .hasRow("eve", "Eve Evenson")
@@ -1202,7 +1191,7 @@ class BriteDatabaseTest {
             transaction.end()
         }
         query.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1220,7 +1209,7 @@ class BriteDatabaseTest {
             db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
         }
         query.test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1311,7 +1300,7 @@ class BriteDatabaseTest {
     @Test
     fun nestedTransactionsOnlyNotifyOnce() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1330,7 +1319,7 @@ class BriteDatabaseTest {
             } finally {
                 transactionOuter.end()
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1343,7 +1332,7 @@ class BriteDatabaseTest {
     @Test
     fun nestedTransactionsOnMultipleTables() = runBlockingTest {
         db.createQuery(TestDb.BOTH_TABLES, TestDb.SELECT_MANAGER_LIST).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
             val transactionOuter = db.newTransaction()
@@ -1366,7 +1355,7 @@ class BriteDatabaseTest {
             } finally {
                 transactionOuter.end()
             }
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .hasRow("Alice Allison", "Bob Bobberson")
                 .isExhausted()
@@ -1376,7 +1365,7 @@ class BriteDatabaseTest {
     @Test
     fun emptyTransactionDoesNotNotify() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1393,7 +1382,7 @@ class BriteDatabaseTest {
     @Test
     fun transactionRollbackDoesNotNotify() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItem().runQuery()
+            awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
@@ -1454,7 +1443,7 @@ class BriteDatabaseTest {
     }
 
     @Test
-    fun badInsertThrows() {
+    fun badInsertThrows() = runBlockingTest {
         try {
             db.insert("missing", SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
             Assert.fail()
@@ -1464,7 +1453,7 @@ class BriteDatabaseTest {
     }
 
     @Test
-    fun badUpdateThrows() {
+    fun badUpdateThrows() = runBlockingTest{
         try {
             db.update("missing", SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"), "1")
             Assert.fail()
@@ -1474,7 +1463,7 @@ class BriteDatabaseTest {
     }
 
     @Test
-    fun badDeleteThrows() {
+    fun badDeleteThrows() = runBlockingTest {
         try {
             db.delete("missing", "1")
             Assert.fail()

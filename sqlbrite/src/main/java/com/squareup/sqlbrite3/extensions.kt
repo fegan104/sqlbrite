@@ -49,12 +49,12 @@ typealias Mapper<T> = (Cursor) -> T
  *
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
  */
-inline fun <T> Flow<Query?>.mapToOne(noinline mapper: (Cursor) -> T): Flow<T> {
+inline fun <T> Flow<Query>.mapToOne(noinline mapper: (Cursor) -> T): Flow<T> {
     return transform { query ->
         var item: T? = null
 
-        query?.runQuery()?.use { cursor ->
-            if (cursor.moveToNext()) {
+        query.runQuery().use { cursor ->
+            if (cursor?.moveToNext() == true) {
                 item = mapper(cursor)
                 check(!cursor.moveToNext()) { "Cursor returned more than 1 row" }
             }
@@ -77,14 +77,14 @@ inline fun <T> Flow<Query?>.mapToOne(noinline mapper: (Cursor) -> T): Flow<T> {
  * This operator emits `defaultValue` if null is returned from [Query.run].
  *
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
- * @param default Value returned if result set is empty
+ * @param defaultValue Value returned if result set is empty
  */
-inline fun <T> Flow<Query?>.mapToOneOrDefault(defaultValue: T, noinline mapper: (Cursor) -> T): Flow<T> {
+inline fun <T> Flow<Query>.mapToOneOrDefault(defaultValue: T, noinline mapper: (Cursor) -> T): Flow<T> {
     return transform { query ->
         var item: T? = null
 
-        query?.runQuery()?.use { cursor ->
-            if (cursor.moveToNext()) {
+        query.runQuery().use { cursor ->
+            if (cursor?.moveToNext() == true) {
                 item = mapper(cursor)
                 check(!cursor.moveToNext()) { "Cursor returned more than 1 row" }
             }
@@ -105,38 +105,17 @@ inline fun <T> Flow<Query?>.mapToOneOrDefault(defaultValue: T, noinline mapper: 
  *
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
  */
-inline fun <T> Flow<Query?>.mapToList(noinline mapper: Mapper<T>): Flow<List<T>> {
-    //TODO Flow<Query?>?
+inline fun <T> Flow<Query>.mapToList(noinline mapper: Mapper<T>): Flow<List<T>> {
     return transform { query ->
         val items = mutableListOf<T>()
 
-        query?.runQuery()?.use { cursor ->
-            while (cursor.moveToNext()) {
+        query.runQuery().use { cursor ->
+            while (cursor?.moveToNext() == true) {
                 items += mapper(cursor)
             }
         }
 
         emit(items)
-    }
-}
-
-/**
- * Run the database interactions in `body` inside of a transaction.
- *
- * @param exclusive Uses [BriteDatabase.newTransaction] if true, otherwise
- * [BriteDatabase.newNonExclusiveTransaction].
- */
-suspend inline fun <T> BriteDatabase.inTransaction(
-    exclusive: Boolean = true,
-    body: BriteDatabase.(Transaction) -> T
-): T {
-    val transaction = if (exclusive) newTransaction() else newNonExclusiveTransaction()
-    try {
-        val result = body(transaction)
-        transaction.markSuccessful()
-        return result
-    } finally {
-        transaction.end()
     }
 }
 
@@ -176,20 +155,14 @@ internal class TransactionElement(
     }
 }
 
-private suspend fun BriteDatabase.createTransactionContext(transaction: BriteDatabase.SqliteTransaction): CoroutineContext {
-    val controlJob = Job()
-    val dispatcher = transactionExecutor.acquireTransactionThread(controlJob)
-    val transactionElement = TransactionElement(controlJob, dispatcher)
-    val threadLocalElement = transactions.asContextElement(transaction)
-    return dispatcher + transactionElement + threadLocalElement
-}
+
 
 /**
  * Prepares and returns a [ContinuationInterceptor] to dispatch coroutines to
  * an acquired thread used to perform transaction work. The [controlJob] is used
  * to control the release of the thread by cancelling the job.
  */
-private suspend fun Executor.acquireTransactionThread(
+internal suspend fun Executor.acquireTransactionThread(
     controlJob: Job
 ): ContinuationInterceptor = suspendCancellableCoroutine { continuation ->
     continuation.invokeOnCancellation {
@@ -223,34 +196,3 @@ private suspend fun Executor.acquireTransactionThread(
     }
 }
 
-suspend fun <R> BriteDatabase.withTransaction(
-    block: suspend () -> R
-): R {
-    // Use inherited transaction context if available, this allows nested
-    // suspending transactions.
-    val transaction = BriteDatabase.SqliteTransaction(transactions.get())
-    val transactionContext =
-        coroutineContext[TransactionElement]?.transactionDispatcher
-            ?: createTransactionContext(transaction)
-    return withContext(transactionContext) {
-        val transactionElement = coroutineContext[TransactionElement]!!
-        transactionElement.acquire()
-        try {
-            if (logging) log("TXN BEGIN %s", transaction)
-            writableDatabase.beginTransactionWithListener(transaction)
-            try {
-                // Wrap suspending block in a new scope to wait for any
-                // child coroutine.
-                val result = coroutineScope {
-                    block.invoke()
-                }
-                this@withTransaction.transaction.markSuccessful()
-                return@withContext result
-            } finally {
-                this@withTransaction.transaction.end()
-            }
-        } finally {
-            transactionElement.release()
-        }
-    }
-}

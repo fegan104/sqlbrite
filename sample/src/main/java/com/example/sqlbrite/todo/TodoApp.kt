@@ -13,27 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.example.sqlbrite.todo;
+package com.example.sqlbrite.todo
 
-import android.app.Application;
-import com.example.sqlbrite.todo.db.DbModule;
-import dagger.Module;
-import dagger.Provides;
-import javax.inject.Singleton;
+import android.app.Application
+import timber.log.Timber
+import timber.log.Timber.DebugTree
+import dagger.hilt.android.HiltAndroidApp
 
-@Module(
-    includes = {
-        DbModule.class,
+@HiltAndroidApp
+class TodoApp : Application() {
+
+    override fun onCreate() {
+        super.onCreate()
+        if (BuildConfig.DEBUG) {
+            Timber.plant(DebugTree())
+        }
     }
-)
-public final class TodoModule {
-  private final Application application;
-
-  TodoModule(Application application) {
-    this.application = application;
-  }
-
-  @Provides @Singleton Application provideApplication() {
-    return application;
-  }
 }

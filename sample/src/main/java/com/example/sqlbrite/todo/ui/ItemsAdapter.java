@@ -23,12 +23,13 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.CheckedTextView;
+
 import com.example.sqlbrite.todo.db.TodoItem;
-import io.reactivex.functions.Consumer;
+
 import java.util.Collections;
 import java.util.List;
 
-final class ItemsAdapter extends BaseAdapter implements Consumer<List<TodoItem>> {
+final class ItemsAdapter extends BaseAdapter {
   private final LayoutInflater inflater;
 
   private List<TodoItem> items = Collections.emptyList();
@@ -37,7 +38,7 @@ final class ItemsAdapter extends BaseAdapter implements Consumer<List<TodoItem>>
     inflater = LayoutInflater.from(context);
   }
 
-  @Override public void accept(List<TodoItem> items) {
+  public void accept(List<TodoItem> items) {
     this.items = items;
     notifyDataSetChanged();
   }
@@ -51,7 +52,7 @@ final class ItemsAdapter extends BaseAdapter implements Consumer<List<TodoItem>>
   }
 
   @Override public long getItemId(int position) {
-    return getItem(position).id();
+    return getItem(position).getId();
   }
 
   @Override public boolean hasStableIds() {
@@ -65,10 +66,10 @@ final class ItemsAdapter extends BaseAdapter implements Consumer<List<TodoItem>>
 
     TodoItem item = getItem(position);
     CheckedTextView textView = (CheckedTextView) convertView;
-    textView.setChecked(item.complete());
+    textView.setChecked(item.getComplete());
 
-    CharSequence description = item.description();
-    if (item.complete()) {
+    CharSequence description = item.getDescription();
+    if (item.getComplete()) {
       SpannableString spannable = new SpannableString(description);
       spannable.setSpan(new StrikethroughSpan(), 0, description.length(), 0);
       description = spannable;

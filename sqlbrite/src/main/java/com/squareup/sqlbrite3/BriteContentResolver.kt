@@ -24,10 +24,11 @@ import android.os.Looper
 import android.support.annotation.CheckResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.channels.sendBlocking
+import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.onStart
 import java.util.Arrays
 import java.util.concurrent.TimeUnit
 
@@ -42,7 +43,7 @@ class BriteContentResolver internal constructor(
     private val queryTransformer: (Flow<SqlBrite.Query>) -> Flow<SqlBrite.Query>
 ) {
 
-    val contentObserverHandler: Handler = Handler(Looper.getMainLooper())
+    private val contentObserverHandler: Handler = Handler(Looper.getMainLooper())
 
     @Volatile
     var logging = false
@@ -53,9 +54,9 @@ class BriteContentResolver internal constructor(
     }
 
     /**
-     * Create an observable which will notify subscribers with a [query][Query] for
+     * Create an observable which will notify subscribers with a [SqlBrite.Query] for
      * execution. Subscribers are responsible for **always** closing [Cursor] instance
-     * returned from the [Query].
+     * returned from the [SqlBrite.Query].
      *
      *
      * Subscribers will receive an immediate notification for initial data as well as subsequent
@@ -64,17 +65,15 @@ class BriteContentResolver internal constructor(
      *
      *
      * Since content resolver triggers are inherently asynchronous, items emitted from the returned
-     * observable use the [Scheduler] supplied to [SqlBrite.wrapContentProvider]. For
-     * consistency, the immediate notification sent on subscribe also uses this scheduler. As such,
-     * calling [subscribeOn][Observable.subscribeOn] on the returned observable has no effect.
+     * flow use the [CoroutineDispatcher] supplied to [SqlBrite.wrapContentProvider].
      *
      *
      * Note: To skip the immediate notification and only receive subsequent notifications when data
-     * has changed call `skip(1)` on the returned observable.
+     * has changed call `drop(1)` on the returned observable.
      *
      *
-     * **Warning:** this method does not perform the query! Only by subscribing to the returned
-     * [Observable] will the operation occur.
+     * **Warning:** this method does not perform the query! Only by collecting the returned
+     * [Flow] will the operation occur.
      *
      * @see ContentResolver.query
      * @see ContentResolver.registerContentObserver
@@ -82,29 +81,28 @@ class BriteContentResolver internal constructor(
     @CheckResult
     fun createQuery(
         uri: Uri,
-        projection: Array<String?>?,
-        selection: String?,
-        selectionArgs: Array<String?>?,
-        sortOrder: String?,
-        notifyForDescendents: Boolean
+        projection: Array<String>? = null,
+        selection: String? = null,
+        selectionArgs: Array<String>? = null,
+        sortOrder: String? = null,
+        notifyForDescendants: Boolean = false
     ): Flow<SqlBrite.Query> {
         val query: SqlBrite.Query = object : SqlBrite.Query() {
-            override suspend fun runQuery(): Cursor {
+            override suspend fun runQuery(): Cursor? {
                 val startNanos = System.nanoTime()
-                val cursor: Cursor = contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
+                val cursor: Cursor? = contentResolver.query(uri, projection, selection, selectionArgs, sortOrder)
                 if (logging) {
                     val tookMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos)
                     log(
                         """QUERY (%sms)
-                        uri: %s
-                        projection: %s
-                        selection: %s
-                        selectionArgs: %s
-                        sortOrder: %s
-                        notifyForDescendents: %s
-                        """.trimIndent(), tookMillis, uri,
-                        Arrays.toString(projection), selection, Arrays.toString(selectionArgs), sortOrder,
-                        notifyForDescendents
+                        uri: $uri
+                        projection: $projection
+                        selection: $selection
+                        selectionArgs: ${Arrays.toString(selectionArgs)}
+                        sortOrder: $sortOrder
+                        notifyForDescendants: $notifyForDescendants
+                        """.trimIndent(),
+                        tookMillis
                     )
                 }
                 return cursor
@@ -114,23 +112,24 @@ class BriteContentResolver internal constructor(
         val queries: Flow<SqlBrite.Query> = callbackFlow {
             val observer: ContentObserver = object : ContentObserver(contentObserverHandler) {
                 override fun onChange(selfChange: Boolean) {
-                    sendBlocking(query)
+                    trySendBlocking(query)
                 }
             }
-            contentResolver.registerContentObserver(uri, notifyForDescendents, observer)
+            contentResolver.registerContentObserver(uri, notifyForDescendants, observer)
             awaitClose {
                 contentResolver.unregisterContentObserver(observer)
             }
         }
 
-        return queries //
-            .flowOn(dispatcher) //
+        return queries
+            .onStart { emit(query) }
+            .flowOn(dispatcher)
             .let(queryTransformer) // Apply the user's query transformer.
     }
 
-    fun log(message: String?, vararg args: Any?) {
-        var message = message
-        if (args.size > 0) message = String.format(message!!, *args)
-        logger.log(message)
+    fun log(message: String, vararg args: Any?) {
+        logger.log(
+            if (args.isNotEmpty()) message.format(*args) else message
+        )
     }
 }

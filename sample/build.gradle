@@ -1,19 +1,23 @@
-apply plugin: 'com.android.application'
+plugins {
+  id 'com.android.application'
+  id 'kotlin-android'
+  id 'kotlin-kapt'
+  id 'dagger.hilt.android.plugin'
+  id 'kotlin-parcelize'
+}
 
 dependencies {
-  implementation rootProject.ext.supportV4
   implementation rootProject.ext.supportAnnotations
+  implementation rootProject.ext.viewModel
+  implementation "androidx.fragment:fragment-ktx:1.4.0"
+  implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.4.0"
+  implementation rootProject.ext.hilt
+  kapt rootProject.ext.hiltCompiler
 
   implementation rootProject.ext.dagger
   annotationProcessor rootProject.ext.daggerCompiler
 
-  implementation rootProject.ext.butterKnifeRuntime
-  annotationProcessor rootProject.ext.butterKnifeCompiler
   implementation rootProject.ext.timber
-
-  compileOnly rootProject.ext.autoValue
-  annotationProcessor rootProject.ext.autoValue
-  annotationProcessor rootProject.ext.autoValueParcel
 
   implementation project(':sqlbrite')
   implementation rootProject.ext.supportSqliteFramework
@@ -23,8 +27,8 @@ android {
   compileSdkVersion versions.compileSdk
 
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_7
-    targetCompatibility JavaVersion.VERSION_1_7
+    sourceCompatibility JavaVersion.VERSION_1_8
+    targetCompatibility JavaVersion.VERSION_1_8
   }
 
   lintOptions {

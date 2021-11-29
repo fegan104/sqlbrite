@@ -28,6 +28,9 @@ import android.support.annotation.CheckResult
 import android.support.annotation.IntDef
 import android.support.annotation.WorkerThread
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.filter
@@ -37,7 +40,6 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.withContext
 import java.io.Closeable
-import java.util.Arrays
 import java.util.LinkedHashSet
 import java.util.concurrent.Executor
 import java.util.concurrent.ExecutorService
@@ -45,6 +47,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ThreadFactory
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.coroutineContext
 
 /**
  * A lightweight wrapper around [SupportSQLiteOpenHelper] which allows for continuously
@@ -54,7 +58,7 @@ class BriteDatabase internal constructor(
     private val helper: SupportSQLiteOpenHelper,
     private val logger: SqlBrite.Logger,
     private val dispatcher: CoroutineDispatcher,
-    val transactionExecutor: Executor = defaultTransactionExecutor(),
+    private val transactionExecutor: Executor = defaultTransactionExecutor(),
     private val queryTransformer: (Flow<SqlBrite.Query>) -> Flow<SqlBrite.Query>
 ) : Closeable {
 
@@ -65,7 +69,7 @@ class BriteDatabase internal constructor(
 
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
-    val transaction: Transaction = object : Transaction {
+    private val transaction: Transaction = object : Transaction {
         override fun markSuccessful() {
             if (logging) log("TXN SUCCESS %s", transactions.get())
             writableDatabase.setTransactionSuccessful()
@@ -133,12 +137,12 @@ class BriteDatabase internal constructor(
     @get:WorkerThread
     @get:CheckResult
     val readableDatabase: SupportSQLiteDatabase
-        get() = helper.getReadableDatabase()
+        get() = helper.readableDatabase
 
     /**
      * Create and/or open a database that will be used for reading and writing.
      * The first time this is called, the database will be opened and
-     * [Callback.onCreate], [Callback.onUpgrade] and/or [Callback.onOpen] will be
+     * [SupportSQLiteOpenHelper.Callback.onCreate], [SupportSQLiteOpenHelper.Callback.onUpgrade] and/or [SupportSQLiteOpenHelper.Callback.onOpen] will be
      * called.
      *
      *
@@ -277,9 +281,9 @@ class BriteDatabase internal constructor(
     }
 
     /**
-     * Create an observable which will notify subscribers with a [query][Query] for
+     * Create an observable which will notify subscribers with a [SqlBrite.Query] for
      * execution. Subscribers are responsible for **always** closing [Cursor] instance
-     * returned from the [Query].
+     * returned from the [SqlBrite.Query].
      *
      *
      * Subscribers will receive an immediate notification for initial data as well as subsequent
@@ -289,17 +293,16 @@ class BriteDatabase internal constructor(
      *
      *
      * Since database triggers are inherently asynchronous, items emitted from the returned
-     * observable use the [Scheduler] supplied to [SqlBrite.wrapDatabaseHelper]. For
-     * consistency, the immediate notification sent on subscribe also uses this scheduler. As such,
-     * calling [subscribeOn][Observable.subscribeOn] on the returned observable has no effect.
+     * observable use the [CoroutineDispatcher] supplied to [SqlBrite.wrapDatabaseHelper]. For
+     * consistency, the immediate notification sent on subscribe also uses this scheduler.
      *
      *
      * Note: To skip the immediate notification and only receive subsequent notifications when data
-     * has changed call `skip(1)` on the returned observable.
+     * has changed call `drop(1)` on the returned observable.
      *
      *
      * **Warning:** this method does not perform the query! Only by subscribing to the returned
-     * [Observable] will the operation occur.
+     * [Flow] will the operation occur.
      *
      * @see SupportSQLiteDatabase.query
      */
@@ -328,9 +331,9 @@ class BriteDatabase internal constructor(
     }
 
     /**
-     * Create an observable which will notify subscribers with a [query][Query] for
+     * Create an flow which will notify subscribers with a [SqlBrite.Query] for
      * execution. Subscribers are responsible for **always** closing [Cursor] instance
-     * returned from the [Query].
+     * returned from the [SqlBrite.Query].
      *
      *
      * Subscribers will receive an immediate notification for initial data as well as subsequent
@@ -340,17 +343,16 @@ class BriteDatabase internal constructor(
      *
      *
      * Since database triggers are inherently asynchronous, items emitted from the returned
-     * observable use the [Scheduler] supplied to [SqlBrite.wrapDatabaseHelper]. For
-     * consistency, the immediate notification sent on subscribe also uses this scheduler. As such,
-     * calling [subscribeOn][Observable.subscribeOn] on the returned observable has no effect.
+     * flows use the [CoroutineDispatcher] supplied to [SqlBrite.wrapDatabaseHelper]. For
+     * consistency, the immediate notification sent on subscribe also uses this dispatcher.
      *
      *
      * Note: To skip the immediate notification and only receive subsequent notifications when data
-     * has changed call `skip(1)` on the returned observable.
+     * has changed call `drop(1)` on the returned flow.
      *
      *
      * **Warning:** this method does not perform the query! Only by subscribing to the returned
-     * [Observable] will the operation occur.
+     * [Flow] will the operation occur.
      *
      * @see SupportSQLiteDatabase.query
      */
@@ -415,12 +417,12 @@ class BriteDatabase internal constructor(
      */
     @CheckResult
     @WorkerThread
-    fun query(query: SupportSQLiteQuery): Cursor {
+    suspend fun query(query: SupportSQLiteQuery): Cursor = withContext(dispatcher) {
         val cursor: Cursor = readableDatabase.query(query)
         if (logging) {
-            log("QUERY\n  sql: %s", indentSql(query.getSql()))
+            log("QUERY\n  sql: %s", indentSql(query.sql))
         }
-        return cursor
+        cursor
     }
 
     /**
@@ -429,10 +431,10 @@ class BriteDatabase internal constructor(
      * @see SupportSQLiteDatabase.insert
      */
     @WorkerThread
-    fun insert(
+    suspend fun insert(
         table: String, @ConflictAlgorithm conflictAlgorithm: Int,
         values: ContentValues
-    ): Long {
+    ): Long = withContext(dispatcher) {
         val db: SupportSQLiteDatabase = writableDatabase
         if (logging) {
             log(
@@ -446,7 +448,7 @@ class BriteDatabase internal constructor(
             // Only send a table trigger if the insert was successful.
             sendTableTrigger(setOf(table))
         }
-        return rowId
+        rowId
     }
 
     /**
@@ -456,15 +458,15 @@ class BriteDatabase internal constructor(
      * @see SupportSQLiteDatabase.delete
      */
     @WorkerThread
-    fun delete(
+    suspend fun delete(
         table: String, whereClause: String?,
         vararg whereArgs: String?
-    ): Int {
+    ): Int = withContext(dispatcher) {
         val db: SupportSQLiteDatabase = writableDatabase
         if (logging) {
             log(
                 "DELETE\n  table: %s\n  whereClause: %s\n  whereArgs: %s", table, whereClause,
-                Arrays.toString(whereArgs)
+                whereArgs.contentToString()
             )
         }
         val rows: Int = db.delete(table, whereClause, whereArgs)
@@ -473,7 +475,7 @@ class BriteDatabase internal constructor(
             // Only send a table trigger if rows were affected.
             sendTableTrigger(setOf(table))
         }
-        return rows
+        rows
     }
 
     /**
@@ -483,15 +485,15 @@ class BriteDatabase internal constructor(
      * @see SupportSQLiteDatabase.update
      */
     @WorkerThread
-    fun update(
+    suspend fun update(
         table: String, @ConflictAlgorithm conflictAlgorithm: Int,
         values: ContentValues, whereClause: String?, vararg whereArgs: String?
-    ): Int {
+    ): Int = withContext(dispatcher) {
         val db: SupportSQLiteDatabase = writableDatabase
         if (logging) {
             log(
                 "UPDATE\n  table: %s\n  values: %s\n  whereClause: %s\n  whereArgs: %s\n  conflictAlgorithm: %s",
-                table, values, whereClause, Arrays.toString(whereArgs),
+                table, values, whereClause, whereArgs.contentToString(),
                 conflictString(conflictAlgorithm)
             )
         }
@@ -501,7 +503,7 @@ class BriteDatabase internal constructor(
             // Only send a table trigger if rows were affected.
             sendTableTrigger(setOf(table))
         }
-        return rows
+        rows
     }
 
     /**
@@ -515,7 +517,7 @@ class BriteDatabase internal constructor(
      * @see SupportSQLiteDatabase.execSQL
      */
     @WorkerThread
-    fun execute(sql: String) {
+    suspend fun execute(sql: String) = withContext(dispatcher) {
         if (logging) log("EXECUTE\n  sql: %s", indentSql(sql))
         writableDatabase.execSQL(sql)
     }
@@ -531,8 +533,8 @@ class BriteDatabase internal constructor(
      * @see SupportSQLiteDatabase.execSQL
      */
     @WorkerThread
-    fun execute(sql: String, vararg args: Any?) {
-        if (logging) log("EXECUTE\n  sql: %s\n  args: %s", indentSql(sql), Arrays.toString(args))
+    suspend fun execute(sql: String, vararg args: Any?) = withContext(dispatcher) {
+        if (logging) log("EXECUTE\n  sql: %s\n  args: %s", indentSql(sql), args.contentToString())
         writableDatabase.execSQL(sql, args)
     }
 
@@ -547,7 +549,7 @@ class BriteDatabase internal constructor(
      * @see SupportSQLiteDatabase.execSQL
      */
     @WorkerThread
-    fun executeAndTrigger(table: String, sql: String?) {
+    suspend fun executeAndTrigger(table: String, sql: String?) = withContext(dispatcher) {
         executeAndTrigger(setOf(table), sql!!)
     }
 
@@ -557,7 +559,7 @@ class BriteDatabase internal constructor(
      * @see BriteDatabase.executeAndTrigger
      */
     @WorkerThread
-    fun executeAndTrigger(tables: Set<String>, sql: String) {
+    suspend fun executeAndTrigger(tables: Set<String>, sql: String) = withContext(dispatcher) {
         execute(sql)
         sendTableTrigger(tables)
     }
@@ -565,24 +567,22 @@ class BriteDatabase internal constructor(
     /**
      * Execute `sql` provided it is NOT a `SELECT` or any other SQL statement that
      * returns data. No data can be returned (such as the number of affected rows). Instead, use
-     * [.insert], [.update], et al, when possible.
+     * [insert], [update], et al, when possible.
      *
      *
      * A notification to queries for `table` will be sent after the statement is executed.
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun executeAndTrigger(table: String, sql: String?, vararg args: Any?) = withContext(dispatcher) {
         executeAndTrigger(setOf(table), sql!!, *args)
     }
 
     /**
-     * See [.executeAndTrigger] for usage. This overload allows for triggering multiple tables.
+     * See [executeAndTrigger] for usage. This overload allows for triggering multiple tables.
      *
      * @see BriteDatabase.executeAndTrigger
      */
-    @WorkerThread
     suspend fun executeAndTrigger(tables: Set<String>, sql: String, vararg args: Any?) = withContext(dispatcher) {
         execute(sql, *args)
         sendTableTrigger(tables)
@@ -597,7 +597,6 @@ class BriteDatabase internal constructor(
      *
      * @see SupportSQLiteStatement.executeUpdateDelete
      */
-    @WorkerThread
     suspend fun executeUpdateDelete(table: String, statement: SupportSQLiteStatement): Int = withContext(dispatcher) {
         executeUpdateDelete(setOf(table), statement)
     }
@@ -608,7 +607,6 @@ class BriteDatabase internal constructor(
      *
      * @see BriteDatabase.executeUpdateDelete
      */
-    @WorkerThread
     suspend fun executeUpdateDelete(tables: Set<String>, statement: SupportSQLiteStatement): Int = withContext(dispatcher) {
         if (logging) log("EXECUTE\n %s", statement)
         val rows: Int = statement.executeUpdateDelete()
@@ -629,7 +627,6 @@ class BriteDatabase internal constructor(
      *
      * @see SupportSQLiteStatement.executeInsert
      */
-    @WorkerThread
     suspend fun executeInsert(table: String, statement: SupportSQLiteStatement): Long = withContext(dispatcher) {
         executeInsert(setOf(table), statement)
     }
@@ -640,7 +637,6 @@ class BriteDatabase internal constructor(
      *
      * @see BriteDatabase.executeInsert
      */
-    @WorkerThread
     suspend fun executeInsert(tables: Set<String>, statement: SupportSQLiteStatement): Long = withContext(dispatcher) {
         if (logging) log("EXECUTE\n %s", statement)
         val rowId: Long = statement.executeInsert()
@@ -651,9 +647,44 @@ class BriteDatabase internal constructor(
         return@withContext rowId
     }
 
+    private suspend fun createTransactionContext(transaction: SqliteTransaction): CoroutineContext {
+        val controlJob = Job()
+        val dispatcher = transactionExecutor.acquireTransactionThread(controlJob)
+        val transactionElement = TransactionElement(controlJob, dispatcher)
+        val threadLocalElement = transactions.asContextElement(transaction)
+        return dispatcher + transactionElement + threadLocalElement
+    }
 
-    fun inSuspendingTransaction(): Boolean {
-        return writableDatabase.inTransaction() || transactions.get() != null
+    suspend fun <R> withTransaction(
+        block: suspend () -> R
+    ): R {
+        // Use inherited transaction context if available, this allows nested
+        // suspending transactions.
+        val transaction = SqliteTransaction(transactions.get())
+        val transactionContext =
+            coroutineContext[TransactionElement]?.transactionDispatcher
+                ?: createTransactionContext(transaction)
+        return withContext(transactionContext) {
+            val transactionElement = coroutineContext[TransactionElement]!!
+            transactionElement.acquire()
+            try {
+                if (logging) log("TXN BEGIN %s", transaction)
+                writableDatabase.beginTransactionWithListener(transaction)
+                try {
+                    // Wrap suspending block in a new scope to wait for any
+                    // child coroutine.
+                    val result = coroutineScope {
+                        block.invoke()
+                    }
+                    this@BriteDatabase.transaction.markSuccessful()
+                    return@withContext result
+                } finally {
+                    this@BriteDatabase.transaction.end()
+                }
+            } finally {
+                transactionElement.release()
+            }
+        }
     }
 
 
@@ -729,10 +760,10 @@ class BriteDatabase internal constructor(
     @kotlin.annotation.Retention(AnnotationRetention.SOURCE)
     private annotation class ConflictAlgorithm
 
-    fun log(message: String?, vararg args: Any?) {
-        var message = message
-        if (args.size > 0) message = String.format(message!!, *args)
-        logger.log(message)
+    fun log(message: String, vararg args: Any?) {
+        logger.log(
+            if (args.isNotEmpty()) message.format(*args) else message
+        )
     }
 
     class SqliteTransaction(val parent: SqliteTransaction?) : LinkedHashSet<String>(), SQLiteTransactionListener {
@@ -780,7 +811,7 @@ class BriteDatabase internal constructor(
 
     companion object {
 
-        fun indentSql(sql: String): String {
+        private fun indentSql(sql: String): String {
             return sql.replace("\n", "\n       ")
         }
 
@@ -797,7 +828,7 @@ class BriteDatabase internal constructor(
         }
 
         private fun defaultTransactionExecutor(): ExecutorService = Executors.newFixedThreadPool(4, object : ThreadFactory {
-            private val THREAD_NAME_STEM = "arch_disk_io_%d"
+            private val THREAD_NAME_STEM = "disk_io_%d"
             private val mThreadId: AtomicInteger = AtomicInteger(0)
             override fun newThread(r: Runnable?): Thread {
                 return Thread(r).apply {
