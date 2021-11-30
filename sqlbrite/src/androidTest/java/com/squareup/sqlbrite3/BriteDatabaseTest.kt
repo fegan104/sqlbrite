@@ -429,22 +429,6 @@ class BriteDatabaseTest {
         }
     }
 
-    //            @Test TODO
-    //            fun queryOnlyNotifiedAfterCollect() = runBlockingTest {
-    //                val query: Flow<SqlBrite.Query> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-    //                query.test { }
-    //                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-    //                query.test { }
-    //                query.test {
-    //                    awaitItemAndRunQuery()
-    //                        .hasRow("alice", "Alice Allison")
-    //                        .hasRow("bob", "Bob Bobberson")
-    //                        .hasRow("eve", "Eve Evenson")
-    //                        .hasRow("john", "John Johnson")
-    //                        .isExhausted()
-    //                }
-    //            }
-
     @Test
     fun executeSqlNoTrigger() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
