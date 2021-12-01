@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">SqlBrite To-Do</string>
+  <string name="app_name">SqlKite To-Do</string>
 
   <string name="create">Create</string>
   <string name="cancel">Cancel</string>

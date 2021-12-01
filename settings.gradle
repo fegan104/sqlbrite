@@ -1,5 +1,5 @@
-include ':sqlbrite'
-include ':sqlbrite-lint'
+include ':sqlkite'
+include ':sqlkite-lint'
 include ':sample'
 
-rootProject.name = 'sqlbrite-root'
+rootProject.name = 'sqlkite-root'
