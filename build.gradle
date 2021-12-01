@@ -3,7 +3,7 @@ buildscript {
       'minSdk': 14,
       'compileSdk': 31,
       'kotlin': '1.6.0',
-      'lint': '26.0.1'
+      'lint': '30.0.0'
   ]
 
   repositories {

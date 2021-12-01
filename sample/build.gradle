@@ -14,12 +14,9 @@ dependencies {
   implementation rootProject.ext.hilt
   kapt rootProject.ext.hiltCompiler
 
-  implementation rootProject.ext.dagger
-  annotationProcessor rootProject.ext.daggerCompiler
-
   implementation rootProject.ext.timber
 
-  implementation project(':sqlbrite')
+  implementation project(':sqlkite')
   implementation rootProject.ext.supportSqliteFramework
 }
 
@@ -40,7 +37,7 @@ android {
   defaultConfig {
     minSdkVersion versions.minSdk
     targetSdkVersion versions.compileSdk
-    applicationId 'com.example.sqlbrite.todo'
+    applicationId 'com.example.sqlkite.todo'
 
     versionCode 1
     versionName '1.0'
