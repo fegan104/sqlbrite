@@ -38,9 +38,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineDispatcher
 import kotlinx.coroutines.test.runBlockingTest
+import kotlinx.coroutines.withContext
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Rule
@@ -1415,6 +1417,28 @@ class KiteDatabaseTest {
     //        transactionProceed.countDown()
     //        Truth.assertThat(transactionCompleted.await(10, TimeUnit.SECONDS)).isTrue()
     //    }
+
+    @Test
+    fun suspendingTransactionsWontDeadlock() = runBlocking {
+        val dispatcher1 = newSingleThreadContext("1")
+        val dispatcher2 = newSingleThreadContext("2")
+
+        db.withTransaction {
+            withContext(dispatcher1) {
+                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+            }
+            withContext(dispatcher2) {
+                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+            }
+        }
+
+        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+            awaitItemAndRunQuery()
+                .hasRow("nick", "Nick Nickers")
+                .hasRow("john", "John Johnson")
+                .isExhausted()
+        }
+    }
 
     @Test
     fun badQueryThrows() {
