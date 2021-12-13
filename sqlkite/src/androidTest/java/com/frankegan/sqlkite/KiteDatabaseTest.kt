@@ -29,6 +29,7 @@ import android.os.Build
 import android.support.test.InstrumentationRegistry
 import android.support.test.filters.SdkSuppress
 import android.support.test.runner.AndroidJUnit4
+import android.util.Log
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.coroutineScope
@@ -42,7 +43,6 @@ import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineDispatcher
 import kotlinx.coroutines.test.runBlockingTest
-import kotlinx.coroutines.withContext
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Rule
@@ -51,6 +51,7 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import java.io.Closeable
 import java.io.IOException
+import java.lang.Thread.currentThread
 import java.lang.Thread.sleep
 import java.util.ArrayList
 import java.util.Arrays
@@ -85,9 +86,12 @@ class KiteDatabaseTest {
         val factory: SupportSQLiteOpenHelper.Factory = FrameworkSQLiteOpenHelperFactory()
         val helper: SupportSQLiteOpenHelper = factory.create(configuration)
         real = helper.writableDatabase
-        val logger: SqlKite.Logger = SqlKite.Logger { message -> logs.add(message) }
+        val logger: SqlKite.Logger = SqlKite.Logger { message ->
+            logs.add(message)
+            Log.d("SQLKite", message)
+        }
 
-        db = KiteDatabase(helper, logger, dispatcher, Executors.newSingleThreadExecutor()) { upstream ->
+        db = KiteDatabase(helper, logger, dispatcher) { upstream ->
             upstream.takeWhile { killSwitch }
         }
     }
@@ -1420,22 +1424,32 @@ class KiteDatabaseTest {
 
     @Test
     fun suspendingTransactionsWontDeadlock() = runBlocking {
-        val dispatcher1 = newSingleThreadContext("1")
-        val dispatcher2 = newSingleThreadContext("2")
+        val dispatcher1 = newSingleThreadContext("dispatcher1")
+        val dispatcher2 = newSingleThreadContext("dispatcher2")
+        db.logging = true
 
+        Log.d("SQLKite", "starting on ${currentThread().name}")
         db.withTransaction {
-            withContext(dispatcher1) {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-            }
-            withContext(dispatcher2) {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+            coroutineScope {
+                Log.d("SQLKite", "coroutineScope on ${currentThread().name}")
+                launch(dispatcher1) {
+                    Log.d("SQLKite", "launch(dispatcher1) on ${currentThread().name}")
+                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+                }
+                launch(dispatcher2) {
+                    Log.d("SQLKite", "launch(dispatcher2) on ${currentThread().name}")
+                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+                }
             }
         }
-
+        Log.d("SQLKite", "🎉🎉🎉")
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
             awaitItemAndRunQuery()
-                .hasRow("nick", "Nick Nickers")
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
                 .hasRow("john", "John Johnson")
+                .hasRow("nick", "Nick Nickers")
                 .isExhausted()
         }
     }
