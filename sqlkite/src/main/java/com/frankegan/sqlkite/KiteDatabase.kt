@@ -27,12 +27,9 @@ import android.database.sqlite.SQLiteTransactionListener
 import android.support.annotation.CheckResult
 import android.support.annotation.IntDef
 import android.support.annotation.WorkerThread
-import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asContextElement
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.filter
@@ -68,10 +65,6 @@ class KiteDatabase internal constructor(
     val transactions = ThreadLocal<SqliteTransaction?>()
     private val suspendingTransactionId = ThreadLocal<Int>()
 
-    private val transactionDispatcher: CoroutineDispatcher by lazy {
-        transactionExecutor.asCoroutineDispatcher()
-    }
-
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
     private val transaction: Transaction = object : Transaction {
@@ -106,7 +99,7 @@ class KiteDatabase internal constructor(
     }
 
     private val ensureNotInTransaction = {
-        check(transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
+        check(suspendingTransactionId.get() == null && transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
     }
 
     // Package-private to avoid synthetic accessor method for 'transaction' instance.
@@ -385,7 +378,7 @@ class KiteDatabase internal constructor(
 
     @CheckResult
     private fun createQuery(query: DatabaseQuery): Flow<SqlKite.Query> {
-        check(transactions.get() == null) {
+        check(suspendingTransactionId.get() == null && transactions.get() == null) {
             """
             Cannot create observable query in transaction. 
             Use query() for a query inside a transaction.
@@ -400,6 +393,19 @@ class KiteDatabase internal constructor(
             .let(queryTransformer) // Apply the user's query transformer.
     }
 
+    private suspend fun <R> withQueryOrTransactionContext(block: suspend () -> R): R {
+        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransactionId.get() != null) {
+            return block()
+        }
+        // Use the transaction dispatcher if we are on a transaction coroutine, otherwise
+        // use the database dispatchers.
+        val context = coroutineContext[TransactionElement]?.transactionDispatcher
+            ?: queryDispatcher
+        return withContext(context) {
+            block()
+        }
+    }
+
     /**
      * Runs the provided SQL and returns a [Cursor] over the result set.
      *
@@ -407,8 +413,10 @@ class KiteDatabase internal constructor(
      */
     @CheckResult
     @WorkerThread
-    fun query(sql: String, vararg args: Any): Cursor {
-        val cursor: Cursor = readableDatabase.query(sql, args)
+    suspend fun query(sql: String, vararg args: Any): Cursor {
+        val cursor: Cursor = withQueryOrTransactionContext {
+            readableDatabase.query(sql, args)
+        }
         if (logging) {
             log("QUERY\n  sql: %s\n  args: %s", indentSql(sql), args.contentToString())
         }
@@ -423,7 +431,9 @@ class KiteDatabase internal constructor(
     @CheckResult
     @WorkerThread
     suspend fun query(query: SupportSQLiteQuery): Cursor = withContext(queryDispatcher) {
-        val cursor: Cursor = readableDatabase.query(query)
+        val cursor: Cursor = withQueryOrTransactionContext {
+            readableDatabase.query(query)
+        }
         if (logging) {
             log("QUERY\n  sql: %s", indentSql(query.sql))
         }
@@ -432,7 +442,6 @@ class KiteDatabase internal constructor(
 
     /**
      * Insert a row into the specified `table` and notify any subscribed queries.
-     *TODO [choose context dynamically](https://android.googlesource.com/platform/frameworks/support/+/HEAD/room/room-ktx/src/main/java/androidx/room/CoroutinesRoom.kt#:~:text=the%20database%20dispatchers.-,val%20context%20%3D%20coroutineContext%5BTransactionElement%5D%3F.transactionDispatcher,%3F%3A%20if%20(inTransaction)%20db.transactionDispatcher%20else%20db.getQueryDispatcher(),-return%20withContext(context)
      * @see SupportSQLiteDatabase.insert
      */
     @WorkerThread
@@ -459,19 +468,6 @@ class KiteDatabase internal constructor(
         return rowId
     }
 
-    private suspend fun <R> withQueryOrTransactionContext(inTransaction: Boolean = true, block: () -> R): R {
-        if (writableDatabase.isOpen && writableDatabase.inTransaction() && transactions.get() != null) {
-            return block()
-        }
-        // Use the transaction dispatcher if we are on a transaction coroutine, otherwise
-        // use the database dispatchers.
-        val context = coroutineContext[TransactionElement]?.transactionDispatcher
-            ?: if (inTransaction) transactionDispatcher else queryDispatcher
-        return withContext(context) {
-            block()
-        }
-    }
-
     /**
      * Delete rows from the specified `table` and notify any subscribed queries. This method
      * will not trigger a notification if no rows were deleted.
@@ -480,7 +476,8 @@ class KiteDatabase internal constructor(
      */
     @WorkerThread
     suspend fun delete(
-        table: String, whereClause: String?,
+        table: String,
+        whereClause: String?,
         vararg whereArgs: String?
     ): Int = withContext(queryDispatcher) {
         val db: SupportSQLiteDatabase = writableDatabase
@@ -490,7 +487,9 @@ class KiteDatabase internal constructor(
                 whereArgs.contentToString()
             )
         }
-        val rows: Int = db.delete(table, whereClause, whereArgs)
+        val rows: Int = withQueryOrTransactionContext {
+            db.delete(table, whereClause, whereArgs)
+        }
         if (logging) log("DELETE affected %s %s", rows, if (rows != 1) "rows" else "row")
         if (rows > 0) {
             // Only send a table trigger if rows were affected.
@@ -518,7 +517,9 @@ class KiteDatabase internal constructor(
                 conflictString(conflictAlgorithm)
             )
         }
-        val rows: Int = db.update(table, conflictAlgorithm, values, whereClause, whereArgs)
+        val rows: Int = withQueryOrTransactionContext {
+            db.update(table, conflictAlgorithm, values, whereClause, whereArgs)
+        }
         if (logging) log("UPDATE affected %s %s", rows, if (rows != 1) "rows" else "row")
         if (rows > 0) {
             // Only send a table trigger if rows were affected.
@@ -538,7 +539,7 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.execSQL
      */
     @WorkerThread
-    suspend fun execute(sql: String) = withContext(queryDispatcher) {
+    suspend fun execute(sql: String) = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n  sql: %s", indentSql(sql))
         writableDatabase.execSQL(sql)
     }
@@ -554,7 +555,7 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.execSQL
      */
     @WorkerThread
-    suspend fun execute(sql: String, vararg args: Any?) = withContext(queryDispatcher) {
+    suspend fun execute(sql: String, vararg args: Any?) = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n  sql: %s\n  args: %s", indentSql(sql), args.contentToString())
         writableDatabase.execSQL(sql, args)
     }
@@ -570,7 +571,7 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.execSQL
      */
     @WorkerThread
-    suspend fun executeAndTrigger(table: String, sql: String?) = withContext(queryDispatcher) {
+    suspend fun executeAndTrigger(table: String, sql: String?) = withQueryOrTransactionContext {
         executeAndTrigger(setOf(table), sql!!)
     }
 
@@ -580,7 +581,7 @@ class KiteDatabase internal constructor(
      * @see KiteDatabase.executeAndTrigger
      */
     @WorkerThread
-    suspend fun executeAndTrigger(tables: Set<String>, sql: String) = withContext(queryDispatcher) {
+    suspend fun executeAndTrigger(tables: Set<String>, sql: String) = withQueryOrTransactionContext {
         execute(sql)
         sendTableTrigger(tables)
     }
@@ -595,8 +596,8 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    suspend fun executeAndTrigger(table: String, sql: String?, vararg args: Any?) = withContext(queryDispatcher) {
-        executeAndTrigger(setOf(table), sql!!, *args)
+    suspend fun executeAndTrigger(table: String, sql: String, vararg args: Any?) = withQueryOrTransactionContext {
+        executeAndTrigger(setOf(table), sql, *args)
     }
 
     /**
@@ -604,7 +605,7 @@ class KiteDatabase internal constructor(
      *
      * @see KiteDatabase.executeAndTrigger
      */
-    suspend fun executeAndTrigger(tables: Set<String>, sql: String, vararg args: Any?) = withContext(queryDispatcher) {
+    suspend fun executeAndTrigger(tables: Set<String>, sql: String, vararg args: Any?) = withQueryOrTransactionContext {
         execute(sql, *args)
         sendTableTrigger(tables)
     }
@@ -618,7 +619,7 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteStatement.executeUpdateDelete
      */
-    suspend fun executeUpdateDelete(table: String, statement: SupportSQLiteStatement): Int = withContext(queryDispatcher) {
+    suspend fun executeUpdateDelete(table: String, statement: SupportSQLiteStatement): Int = withQueryOrTransactionContext {
         executeUpdateDelete(setOf(table), statement)
     }
 
@@ -628,14 +629,14 @@ class KiteDatabase internal constructor(
      *
      * @see KiteDatabase.executeUpdateDelete
      */
-    suspend fun executeUpdateDelete(tables: Set<String>, statement: SupportSQLiteStatement): Int = withContext(queryDispatcher) {
+    suspend fun executeUpdateDelete(tables: Set<String>, statement: SupportSQLiteStatement): Int = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n %s", statement)
         val rows: Int = statement.executeUpdateDelete()
         if (rows > 0) {
             // Only send a table trigger if rows were affected.
             sendTableTrigger(tables)
         }
-        return@withContext rows
+        rows
     }
 
     /**
@@ -648,7 +649,7 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteStatement.executeInsert
      */
-    suspend fun executeInsert(table: String, statement: SupportSQLiteStatement): Long = withContext(queryDispatcher) {
+    suspend fun executeInsert(table: String, statement: SupportSQLiteStatement): Long = withQueryOrTransactionContext {
         executeInsert(setOf(table), statement)
     }
 
@@ -658,16 +659,17 @@ class KiteDatabase internal constructor(
      *
      * @see KiteDatabase.executeInsert
      */
-    suspend fun executeInsert(tables: Set<String>, statement: SupportSQLiteStatement): Long = withContext(queryDispatcher) {
+    suspend fun executeInsert(tables: Set<String>, statement: SupportSQLiteStatement): Long = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n %s", statement)
         val rowId: Long = statement.executeInsert()
         if (rowId != -1L) {
             // Only send a table trigger if the insert was successful.
             sendTableTrigger(tables)
         }
-        return@withContext rowId
+        rowId
     }
 
+    //TODO triple check this logic
     fun assertNotSuspendingTransaction() {
         check(writableDatabase.inTransaction() || suspendingTransactionId.get() == null) {
             ("""
@@ -699,18 +701,14 @@ class KiteDatabase internal constructor(
         // Use inherited transaction context if available, this allows nested suspending transactions.
         val transactionContext =
             coroutineContext[TransactionElement]?.transactionDispatcher ?: createTransactionContext()
-        Log.d("SQLKite", "before withTransaction on ${Thread.currentThread().name}")
         return withContext(transactionContext) {
-            Log.d("SQLKite", "inside withTransaction on ${Thread.currentThread().name}")
             val transactionElement = coroutineContext[TransactionElement]!!
             transactionElement.acquire()
             try {
                 if (logging) log("TXN BEGIN %s", transaction)
                 writableDatabase.beginTransaction()
                 try {
-                    Log.d("SQLKite", "invoking block on ${Thread.currentThread().name}")
                     val result = block.invoke()
-                    Log.d("SQLKite", "block ran on ${Thread.currentThread().name}")
                     writableDatabase.setTransactionSuccessful()
                     return@withContext result
                 } finally {
