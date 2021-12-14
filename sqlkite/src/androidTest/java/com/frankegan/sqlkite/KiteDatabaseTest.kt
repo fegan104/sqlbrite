@@ -33,6 +33,7 @@ import android.util.Log
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
@@ -1370,41 +1371,18 @@ class KiteDatabaseTest {
         }
     }
 
-    // TODO non exclusive transactions for coroutines?
-
-    //    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-    //    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.HONEYCOMB)
-    //    @Test
-    //    @Throws(InterruptedException::class)
-    //    fun nonExclusiveTransactionWorks() = runBlockingTest {
-    //        val transactionStarted = CountDownLatch(1)
-    //        val transactionProceed = CountDownLatch(1)
-    //        val transactionCompleted = CountDownLatch(1)
-    //        object : Thread() {
-    //            override fun run() = runBlockingTest {
-    //                val transaction = db.newNonExclusiveTransaction()
-    //                transactionStarted.countDown()
-    //                try {
-    //                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("hans", "Hans Hanson"))
-    //                    transactionProceed.await(10, TimeUnit.SECONDS)
-    //                } catch (e: InterruptedException) {
-    //                    throw RuntimeException("Exception in transaction thread", e)
-    //                }
-    //                transaction.markSuccessful()
-    //                transaction.close()
-    //                transactionCompleted.countDown()
-    //            }
-    //        }.start()
-    //        Truth.assertThat(transactionStarted.await(10, TimeUnit.SECONDS)).isTrue()
-    //
-    //        //Simple query
-    //        val employees: TestDb.Employee = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
-    //            .mapToOne(TestDb.Employee.MAPPER)
-    //            .first()
-    //        Truth.assertThat(employees).isEqualTo(TestDb.Employee("alice", "Alice Allison"))
-    //        transactionProceed.countDown()
-    //        Truth.assertThat(transactionCompleted.await(10, TimeUnit.SECONDS)).isTrue()
-    //    }
+    @Test
+    fun nonExclusiveTransactionWorks() = runBlocking {
+        db.withNonExclusiveTransaction {
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("hans", "Hans Hanson"))
+        }
+        //Simple query
+        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
+            .mapToOne(TestDb.Employee.MAPPER)
+            .test {
+                Truth.assertThat(awaitItem()).isEqualTo(TestDb.Employee("alice", "Alice Allison"))
+            }
+    }
 
     @Test
     fun suspendingTransactionsWontDeadlock() = runBlocking {
@@ -1434,7 +1412,7 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun badQueryThrows() = runBlockingTest{
+    fun badQueryThrows() = runBlockingTest {
         try {
             db.query("SELECT * FROM missing")
             Assert.fail()
@@ -1454,7 +1432,7 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun badUpdateThrows() = runBlockingTest{
+    fun badUpdateThrows() = runBlockingTest {
         try {
             db.update("missing", SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"), "1")
             Assert.fail()

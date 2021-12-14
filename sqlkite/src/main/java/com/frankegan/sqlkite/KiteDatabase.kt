@@ -222,54 +222,6 @@ class KiteDatabase internal constructor(
     }
 
     /**
-     * Begins a transaction in IMMEDIATE mode for this thread.
-     *
-     *
-     * Transactions may nest. If the transaction is not in progress, then a database connection is
-     * obtained and a new transaction is started. Otherwise, a nested transaction is started.
-     *
-     *
-     * Each call to `newNonExclusiveTransaction` must be matched exactly by a call to
-     * [Transaction.end]. To mark a transaction as successful, call
-     * [Transaction.markSuccessful] before calling [Transaction.end]. If the
-     * transaction is not successful, or if any of its nested transactions were not successful, then
-     * the entire transaction will be rolled back when the outermost transaction is ended.
-     *
-     *
-     * Transactions queue up all query notifications until they have been applied.
-     *
-     *
-     * Here is the standard idiom for transactions:
-     *
-     * <pre>`try (Transaction transaction = db.newNonExclusiveTransaction()) {
-     * ...
-     * transaction.markSuccessful();
-     * }
-    `</pre> *
-     *
-     * Manually call [Transaction.end] when try-with-resources is not available:
-     * <pre>`Transaction transaction = db.newNonExclusiveTransaction();
-     * try {
-     * ...
-     * transaction.markSuccessful();
-     * } finally {
-     * transaction.end();
-     * }
-    `</pre> *
-     *
-     *
-     * @see SupportSQLiteDatabase.beginTransactionNonExclusive
-     */
-    @CheckResult
-    fun newNonExclusiveTransaction(): Transaction {
-        val transaction = SqliteTransaction(transactions.get())
-        transactions.set(transaction)
-        if (logging) log("TXN BEGIN %s", transaction)
-        writableDatabase.beginTransactionWithListenerNonExclusive(transaction)
-        return this.transaction
-    }
-
-    /**
      * Close the underlying [SupportSQLiteOpenHelper] and remove cached readable and writeable
      * databases. This does not prevent existing observables from retaining existing references as
      * well as attempting to create new ones for new subscriptions.
@@ -707,6 +659,31 @@ class KiteDatabase internal constructor(
             try {
                 if (logging) log("TXN BEGIN %s", transaction)
                 writableDatabase.beginTransaction()
+                try {
+                    val result = block.invoke()
+                    writableDatabase.setTransactionSuccessful()
+                    return@withContext result
+                } finally {
+                    writableDatabase.endTransaction()
+                }
+            } finally {
+                transactionElement.release()
+            }
+        }
+    }
+
+    suspend fun <R> withNonExclusiveTransaction(
+        block: suspend () -> R
+    ): R {
+        // Use inherited transaction context if available, this allows nested suspending transactions.
+        val transactionContext =
+            coroutineContext[TransactionElement]?.transactionDispatcher ?: createTransactionContext()
+        return withContext(transactionContext) {
+            val transactionElement = coroutineContext[TransactionElement]!!
+            transactionElement.acquire()
+            try {
+                if (logging) log("TXN BEGIN %s", transaction)
+                writableDatabase.beginTransactionNonExclusive()
                 try {
                     val result = block.invoke()
                     writableDatabase.setTransactionSuccessful()
