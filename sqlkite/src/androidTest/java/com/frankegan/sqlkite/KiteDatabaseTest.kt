@@ -972,24 +972,19 @@ class KiteDatabaseTest {
 
     @Test
     fun transactionOnlyNotifiesOnceAndTransactionDoesNotThrow() = runBlocking {
-        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+        query.test {
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
-            db.withTransaction {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-            }
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-            //TODO we should probably only do one emission per transaction
+        }
+        db.withTransaction {
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+        }
+        query.test {
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
@@ -1108,10 +1103,9 @@ class KiteDatabaseTest {
 
     @Test
     fun querySubscribedToDuringWithTransactionThrows() = runBlocking {
-        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
+        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).drop(1)
         db.withTransaction {
             query.test {
-                awaitItem()
                 Truth.assertThat(awaitError())
                     .hasMessageThat()
                     .contains("Cannot subscribe to observable query in a transaction.")

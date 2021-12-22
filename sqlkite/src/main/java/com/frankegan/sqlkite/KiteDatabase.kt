@@ -33,7 +33,6 @@ import kotlinx.coroutines.asContextElement
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.onSubscription
@@ -62,14 +61,13 @@ class KiteDatabase internal constructor(
 ) : Closeable {
 
     // Package-private to avoid synthetic accessor method for 'transaction' instance.
-    val transactions = ThreadLocal<SqliteTransaction?>()
-    private val suspendingTransactionId = ThreadLocal<Int>()
+    private val suspendingTransaction = ThreadLocal<SqliteTransaction?>()
 
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
     private val transaction: Transaction = object : Transaction {
         override fun markSuccessful() {
-            if (logging) log("TXN SUCCESS %s", transactions.get())
+            if (logging) log("TXN SUCCESS %s", suspendingTransaction.get())
             writableDatabase.setTransactionSuccessful()
         }
 
@@ -82,9 +80,9 @@ class KiteDatabase internal constructor(
         }
 
         override fun end() {
-            val transaction: SqliteTransaction = transactions.get() ?: throw IllegalStateException("Not in transaction.")
+            val transaction: SqliteTransaction = suspendingTransaction.get() ?: throw IllegalStateException("Not in transaction.")
             val newTransaction = transaction.parent
-            transactions.set(newTransaction)
+            suspendingTransaction.set(newTransaction)
             if (logging) log("TXN END %s", transaction)
             writableDatabase.endTransaction()
             // Send the triggers after ending the transaction in the DB.
@@ -98,8 +96,8 @@ class KiteDatabase internal constructor(
         }
     }
 
-    private val ensureNotInTransaction = {
-        check(suspendingTransactionId.get() == null && transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
+    private val ensureNotInSuspendingTransaction = {
+        check(!writableDatabase.inTransaction() && suspendingTransaction.get() == null) { "Cannot subscribe to observable query in a transaction." }
     }
 
     // Package-private to avoid synthetic accessor method for 'transaction' instance.
@@ -164,7 +162,7 @@ class KiteDatabase internal constructor(
         get() = helper.writableDatabase
 
     fun sendTableTrigger(tables: Set<String>) {
-        val transaction = transactions.get()
+        val transaction = suspendingTransaction.get()
         if (transaction != null) {
             transaction.addAll(tables)
         } else {
@@ -214,8 +212,8 @@ class KiteDatabase internal constructor(
      */
     @CheckResult
     fun newTransaction(): Transaction {
-        val transaction = SqliteTransaction(transactions.get())
-        transactions.set(transaction)
+        val transaction = SqliteTransaction(suspendingTransaction.get())
+        suspendingTransaction.set(transaction)
         if (logging) log("TXN BEGIN %s", transaction)
         writableDatabase.beginTransactionWithListener(transaction)
         return this.transaction
@@ -330,23 +328,22 @@ class KiteDatabase internal constructor(
 
     @CheckResult
     private fun createQuery(query: DatabaseQuery): Flow<SqlKite.Query> {
-        check(suspendingTransactionId.get() == null && transactions.get() == null) {
+        check(suspendingTransaction.get() == null) {
             """
             Cannot create observable query in transaction. 
             Use query() for a query inside a transaction.
             """.trimIndent()
         }
         return triggers
-            .onSubscription { ensureNotInTransaction() }
+            .onSubscription { ensureNotInSuspendingTransaction() }
             .filter { query.selectsFor(it) } // DatabaseQuery filters triggers to on tables we care about.
             .map { query } // DatabaseQuery maps to itself to save an allocation.
             .onStart { emit(query) }
-            .flowOn(queryDispatcher)
             .let(queryTransformer) // Apply the user's query transformer.
     }
 
     private suspend fun <R> withQueryOrTransactionContext(block: suspend () -> R): R {
-        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransactionId.get() != null) {
+        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransaction.get() != null) {
             return block()
         }
         // Use the transaction dispatcher if we are on a transaction coroutine, otherwise
@@ -621,16 +618,6 @@ class KiteDatabase internal constructor(
         rowId
     }
 
-    //TODO triple check this logic
-    fun assertNotSuspendingTransaction() {
-        check(writableDatabase.inTransaction() || suspendingTransactionId.get() == null) {
-            ("""
-                Cannot access database on a different coroutine 
-                context inherited from a suspending transaction.
-                """.trimIndent())
-        }
-    }
-
     private suspend fun createTransactionContext(): CoroutineContext {
         val controlJob = Job()
         // make sure to tie the control job to this context to avoid blocking the transaction if
@@ -643,7 +630,7 @@ class KiteDatabase internal constructor(
         val dispatcher = transactionExecutor.acquireTransactionThread(controlJob)
         val transactionElement = TransactionElement(controlJob, dispatcher)
         val threadLocalElement =
-            suspendingTransactionId.asContextElement(controlJob.hashCode())
+            suspendingTransaction.asContextElement()
         return dispatcher + transactionElement + threadLocalElement
     }
 
@@ -657,6 +644,8 @@ class KiteDatabase internal constructor(
             val transactionElement = coroutineContext[TransactionElement]!!
             transactionElement.acquire()
             try {
+                val transaction = SqliteTransaction(suspendingTransaction.get())
+                suspendingTransaction.set(transaction)
                 if (logging) log("TXN BEGIN %s", transaction)
                 writableDatabase.beginTransaction()
                 try {
@@ -664,6 +653,7 @@ class KiteDatabase internal constructor(
                     writableDatabase.setTransactionSuccessful()
                     return@withContext result
                 } finally {
+                    suspendingTransaction.set(transaction.parent)
                     writableDatabase.endTransaction()
                 }
             } finally {
@@ -682,6 +672,8 @@ class KiteDatabase internal constructor(
             val transactionElement = coroutineContext[TransactionElement]!!
             transactionElement.acquire()
             try {
+                val transaction = SqliteTransaction(suspendingTransaction.get())
+                suspendingTransaction.set(transaction)
                 if (logging) log("TXN BEGIN %s", transaction)
                 writableDatabase.beginTransactionNonExclusive()
                 try {
@@ -689,6 +681,7 @@ class KiteDatabase internal constructor(
                     writableDatabase.setTransactionSuccessful()
                     return@withContext result
                 } finally {
+                    suspendingTransaction.set(transaction.parent)
                     writableDatabase.endTransaction()
                 }
             } finally {
@@ -797,7 +790,7 @@ class KiteDatabase internal constructor(
     ) : SqlKite.Query() {
 
         override suspend fun runQuery(): Cursor {
-            check(transactions.get() == null) { "Cannot execute observable query in a transaction." }
+            check(suspendingTransaction.get() == null) { "Cannot execute observable query in a transaction." }
             val cursor: Cursor = readableDatabase.query(query)
             if (logging) {
                 log("QUERY\n  tables: %s\n  sql: %s", tables, indentSql(query.sql))
