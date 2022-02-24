@@ -28,13 +28,8 @@ android {
     targetCompatibility JavaVersion.VERSION_1_8
   }
 
-  lintOptions {
-    textOutput 'stdout'
-    textReport true
-    ignore 'InvalidPackage' // Provided AutoValue pulls in Guava and friends. Doesn't end up in APK.
-  }
 
-  defaultConfig {
+    defaultConfig {
     minSdkVersion versions.minSdk
     targetSdkVersion versions.compileSdk
     applicationId 'com.example.sqlkite.todo'
@@ -58,4 +53,9 @@ android {
       signingConfig signingConfigs.debug
     }
   }
+    lint {
+        ignore 'InvalidPackage'
+        textOutput file('stdout')
+        textReport true
+    }
 }

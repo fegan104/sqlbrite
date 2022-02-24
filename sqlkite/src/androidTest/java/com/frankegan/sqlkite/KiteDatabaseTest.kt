@@ -186,9 +186,9 @@ class KiteDatabaseTest {
         val employees: List<TestDb.Employee?> = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
             .mapToList(TestDb.Employee.MAPPER)
             .first()
-        Truth.assertThat(employees).containsExactly( //
-            TestDb.Employee("alice", "Alice Allison"),  //
-            TestDb.Employee("bob", "Bob Bobberson"),  //
+        Truth.assertThat(employees).containsExactly(
+            TestDb.Employee("alice", "Alice Allison"),
+            TestDb.Employee("bob", "Bob Bobberson"),
             TestDb.Employee("eve", "Eve Evenson")
         )
     }
