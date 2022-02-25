@@ -29,15 +29,18 @@ import android.os.Build
 import android.support.test.InstrumentationRegistry
 import android.support.test.filters.SdkSuppress
 import android.support.test.runner.AndroidJUnit4
+import android.util.Log
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.newSingleThreadContext
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineDispatcher
 import kotlinx.coroutines.test.runBlockingTest
@@ -54,11 +57,10 @@ import java.util.ArrayList
 import java.util.Arrays
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 
 
-@RunWith(AndroidJUnit4::class) //
+@RunWith(AndroidJUnit4::class)
 class KiteDatabaseTest {
 
     private val testDb = TestDb()
@@ -83,9 +85,12 @@ class KiteDatabaseTest {
         val factory: SupportSQLiteOpenHelper.Factory = FrameworkSQLiteOpenHelperFactory()
         val helper: SupportSQLiteOpenHelper = factory.create(configuration)
         real = helper.writableDatabase
-        val logger: SqlKite.Logger = SqlKite.Logger { message -> logs.add(message) }
+        val logger: SqlKite.Logger = SqlKite.Logger { message ->
+            logs.add(message)
+            Log.d("SQLKite", message)
+        }
 
-        db = KiteDatabase(helper, logger, dispatcher, Executors.newSingleThreadExecutor()) { upstream ->
+        db = KiteDatabase(helper, logger, dispatcher) { upstream ->
             upstream.takeWhile { killSwitch }
         }
     }
@@ -119,7 +124,7 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun loggerIndentsSqlForQuery() {
+    fun loggerIndentsSqlForQuery() = runBlockingTest {
         db.setLoggingEnabled(true)
         db.query("SELECT\n1").close()
         Truth.assertThat(logs).containsExactly(
@@ -881,8 +886,6 @@ class KiteDatabaseTest {
         }
     }
 
-    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.HONEYCOMB)
     @Test
     fun executeUpdateDeleteThrowsAndDoesNotTrigger() = runBlockingTest {
         val statement: SupportSQLiteStatement = real.compileStatement(
@@ -968,7 +971,7 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun transactionOnlyNotifiesOnceWithCoroutines() = runBlocking {
+    fun transactionOnlyNotifiesOnceAndTransactionDoesNotThrow() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
@@ -979,6 +982,14 @@ class KiteDatabaseTest {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
             }
+            awaitItemAndRunQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .hasRow("john", "John Johnson")
+                .hasRow("nick", "Nick Nickers")
+                .isExhausted()
+            //TODO we should probably only do one emission per transaction
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
@@ -1049,28 +1060,6 @@ class KiteDatabaseTest {
                 transaction.markSuccessful()
             } finally {
                 transaction.close() // Transactions should not throw on close().
-            }
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-        }
-    }
-
-    @Test
-    fun coroutineTransactionDoesNotThrow() = runBlocking {
-        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .isExhausted()
-            db.withTransaction {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
             }
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
@@ -1382,42 +1371,48 @@ class KiteDatabaseTest {
         }
     }
 
-    //    @TargetApi(Build.VERSION_CODES.HONEYCOMB)
-    //    @SdkSuppress(minSdkVersion = Build.VERSION_CODES.HONEYCOMB)
-    //    @Test
-    //    @Throws(InterruptedException::class)
-    //    fun nonExclusiveTransactionWorks() = runBlockingTest {
-    //        val transactionStarted = CountDownLatch(1)
-    //        val transactionProceed = CountDownLatch(1)
-    //        val transactionCompleted = CountDownLatch(1)
-    //        object : Thread() {
-    //            override fun run() = runBlockingTest {
-    //                val transaction = db.newNonExclusiveTransaction()
-    //                transactionStarted.countDown()
-    //                try {
-    //                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("hans", "Hans Hanson"))
-    //                    transactionProceed.await(10, TimeUnit.SECONDS)
-    //                } catch (e: InterruptedException) {
-    //                    throw RuntimeException("Exception in transaction thread", e)
-    //                }
-    //                transaction.markSuccessful()
-    //                transaction.close()
-    //                transactionCompleted.countDown()
-    //            }
-    //        }.start()
-    //        Truth.assertThat(transactionStarted.await(10, TimeUnit.SECONDS)).isTrue()
-    //
-    //        //Simple query
-    //        val employees: TestDb.Employee = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
-    //            .mapToOne(TestDb.Employee.MAPPER)
-    //            .first()
-    //        Truth.assertThat(employees).isEqualTo(TestDb.Employee("alice", "Alice Allison"))
-    //        transactionProceed.countDown()
-    //        Truth.assertThat(transactionCompleted.await(10, TimeUnit.SECONDS)).isTrue()
-    //    }
+    @Test
+    fun nonExclusiveTransactionWorks() = runBlocking {
+        db.withNonExclusiveTransaction {
+            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("hans", "Hans Hanson"))
+        }
+        //Simple query
+        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES + " LIMIT 1")
+            .mapToOne(TestDb.Employee.MAPPER)
+            .test {
+                Truth.assertThat(awaitItem()).isEqualTo(TestDb.Employee("alice", "Alice Allison"))
+            }
+    }
 
     @Test
-    fun badQueryThrows() {
+    fun suspendingTransactionsWontDeadlock() = runBlocking {
+        val dispatcher1 = newSingleThreadContext("dispatcher1")
+        val dispatcher2 = newSingleThreadContext("dispatcher2")
+
+        db.withTransaction {
+            coroutineScope {
+                launch(dispatcher1) {
+                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+                }
+                launch(dispatcher2) {
+                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+                }
+            }
+        }
+
+        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
+            awaitItemAndRunQuery()
+                .hasRow("alice", "Alice Allison")
+                .hasRow("bob", "Bob Bobberson")
+                .hasRow("eve", "Eve Evenson")
+                .hasRow("john", "John Johnson")
+                .hasRow("nick", "Nick Nickers")
+                .isExhausted()
+        }
+    }
+
+    @Test
+    fun badQueryThrows() = runBlockingTest {
         try {
             db.query("SELECT * FROM missing")
             Assert.fail()
@@ -1437,7 +1432,7 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun badUpdateThrows() = runBlockingTest{
+    fun badUpdateThrows() = runBlockingTest {
         try {
             db.update("missing", SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"), "1")
             Assert.fail()
