@@ -1,8 +1,9 @@
 SQL Kite 🪁🍃
 =========
 
-A lightweight Kotlin wrapper around `SupportSQLiteOpenHelper` and `ContentResolver` which introduces reactive
-Flow queries.
+A lightweight Kotlin library that makes working with `SupportSQLiteOpenHelper` & `ContentResolver` a breeze by introducing reactive
+Flow based queries.
+
 
 This library is a fork of Squares [SQL Brite](https://github.com/square/sqlbrite) but uses Kotlin Flows and suspending fucntions instead of RX Java primitives.
 
