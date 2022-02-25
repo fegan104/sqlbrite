@@ -27,7 +27,7 @@ additional parameter of table(s) on which to listen for changes. Subscribe to th
 `Flow<Query>` which will immediately notify with a `Query` to run.
 
 ```
-Flow<Query> users = db.createQuery("users", "SELECT * FROM users")
+val users: Flow<Query> = db.createQuery("users", "SELECT * FROM users")
 users.collect {
     val cursor = query.run();
     // TODO parse data...
