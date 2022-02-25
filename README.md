@@ -96,7 +96,7 @@ Since queries are just regular Kotlin `Flow` objects, operators can also be used
 control the frequency of notifications to collectors.
 
 ```
-users.debounce(500.milliseconds).collectprs {
+users.debounce(500.milliseconds).collect {
   //TODO...
 }
 ```
