@@ -5,7 +5,7 @@ A lightweight Kotlin library that makes working with `SupportSQLiteOpenHelper` &
 Flow based queries.
 
 
-This library is a fork of Squares [SQL Brite](https://github.com/square/sqlbrite) but uses Kotlin Flows and suspending fucntions instead of RX Java primitives.
+This library is a fork of Square's [SQL Brite](https://github.com/square/sqlbrite) but uses Kotlin Flows and suspending functions instead of RX Java primitives.
 
 Usage
 -----
