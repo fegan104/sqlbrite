@@ -19,7 +19,7 @@ val sqlKite = SqlKite.Builder().build()
 Pass a `SupportSQLiteOpenHelper` instance and a `Dispatcher` to create a `KiteDatabase`.
 
 ```
-val db = sqlKite.wrapDatabaseHelper(openHelper, Dispatchers.io())
+val db = sqlKite.wrapDatabaseHelper(openHelper, Dispatchers.IO)
 ```
 
 The `KiteDatabase.createQuery` method is similar to `SupportSQLiteDatabase.query` except it takes an
