@@ -39,15 +39,15 @@ notifications for as long as you remain subscribed to the observable. This means
 insert, update, or delete data, any subscribed queries will update with the new data instantly.
 
 ```
-val queries = new AtomicInteger();
+val queries = AtomicInteger()
 users.collect {
     queries.getAndIncrement()
 }
 println("Queries: ${queries.get()}") // Prints 1
 
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"));
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"));
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"));
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"))
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"))
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"))
 
 println("Queries: ${queries.get()}") // Prints 4
 ```
@@ -58,39 +58,39 @@ or delete operations must go through this object in order to correctly notify su
 Cancel the collector scope for the returned `Flow` to stop getting updates.
 
 ```
-val queries = new AtomicInteger();
+val queries = AtomicInteger()
 val queryCollector = launch {
   users.collect {
-    queries.getAndIncrement();
+    queries.getAndIncrement()
   }
 }
-System.out.println("Queries: ${queries.get()}"); // Prints 1
+System.out.println("Queries: ${queries.get()}") // Prints 1
 
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"));
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"));
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"))
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"))
 queryCollector.cancel()
 
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"));
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"))
 
-println("Queries: ${queries.get()}"); // Prints 3
+println("Queries: ${queries.get()}") // Prints 3
 ```
 
 Use transactions to prevent large changes to the data from spamming your subscribers.
 
 ```
-val queries = new AtomicInteger();
+val queries = AtomicInteger()
 users.collect {
-    queries.getAndIncrement();
+    queries.getAndIncrement()
 }
-println("Queries: ${queries.get()}"); // Prints 1
+println("Queries: ${queries.get()}") // Prints 1
 
 val transaction = db.withTransaction {
-  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"));
-  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"));
-  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"));
+  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"))
+  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"))
+  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"))
 }
 
-println("Queries: ${queries.get()}"); // Prints 2
+println("Queries: ${queries.get()}") // Prints 2
 ```
 Since queries are just regular Kotlin `Flow` objects, operators can also be used to
 control the frequency of notifications to collectors.
@@ -105,8 +105,8 @@ The `SqlKite` object can also wrap a `ContentResolver` for observing a query on 
 content provider.
 
 ```
-val resolver = sqlKite.wrapContentProvider(contentResolver, Dispatchers.IO);
-val query: FLow<SqlKite.Query> = resolver.createQuery(/*...*/);
+val resolver = sqlKite.wrapContentProvider(contentResolver, Dispatchers.IO)
+val query: FLow<SqlKite.Query> = resolver.createQuery(/*...*/)
 ```
 
 The full power of Kotlin Flow's operators are available for combining, filtering, and triggering any
