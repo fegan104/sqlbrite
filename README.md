@@ -129,18 +129,8 @@ Download
 --------
 
 ```groovy
-implementation 'com.squareup.sqlbrite3:sqlbrite:3.2.0'
+implementation 'TODO'
 ```
-
-For the 'kotlin' module that adds extension functions to `Observable<Query>`:
-```groovy
-implementation 'com.squareup.sqlbrite3:sqlbrite-kotlin:3.2.0'
-```
-
-
-Snapshots of the development version are available in [Sonatype's `snapshots` repository][snap].
-
-
 
 License
 -------
@@ -160,9 +150,3 @@ License
     See the License for the specific language governing permissions and
     limitations under the License.
 
-
-
-
-
- [snap]: https://oss.sonatype.org/content/repositories/snapshots/
- [sqldelight]: https://github.com/square/sqldelight/
