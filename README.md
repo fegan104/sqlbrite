@@ -1,142 +1,115 @@
-SQL Brite
+SQL Kite 🪁🍃
 =========
 
-A lightweight wrapper around `SupportSQLiteOpenHelper` and `ContentResolver` which introduces reactive
-stream semantics to queries.
-
-# Deprecated
-
-This library is no longer actively developed and is considered complete.
-
-Its database features (and far, far more) are now offered by [SQLDelight](https://github.com/cashapp/sqldelight/)
-and its [upgrading guide](https://github.com/cashapp/sqldelight/blob/1.0.0/UPGRADING.md) offers some
-migration help.
-
-For content provider monitoring please use [Copper](https://github.com/cashapp/copper) instead.
+A lightweight Kotlin library that makes working with `SupportSQLiteOpenHelper` & `ContentResolver` a breeze by introducing reactive
+Flow based queries.
 
 
+This library is a fork of Square's [SQL Brite](https://github.com/square/sqlbrite) but uses Kotlin Flows and suspending functions instead of RX Java primitives.
 
 Usage
 -----
 
-Create a `SqlBrite` instance which is an adapter for the library functionality.
+Create a `SqlKite` instance which is an adapter for the library functionality.
 
-```java
-SqlBrite sqlBrite = new SqlBrite.Builder().build();
+```
+val sqlKite = SqlKite.Builder().build()
 ```
 
-Pass a `SupportSQLiteOpenHelper` instance and a `Scheduler` to create a `BriteDatabase`.
+Pass a `SupportSQLiteOpenHelper` instance and a `Dispatcher` to create a `KiteDatabase`.
 
-```java
-BriteDatabase db = sqlBrite.wrapDatabaseHelper(openHelper, Schedulers.io());
+```
+val db = sqlKite.wrapDatabaseHelper(openHelper, Dispatchers.IO)
 ```
 
-A `Scheduler` is required for a few reasons, but the most important is that query notifications can
-trigger on the thread of your choice. The query can then be run without blocking the main thread or
-the thread which caused the trigger.
-
-The `BriteDatabase.createQuery` method is similar to `SupportSQLiteDatabase.query` except it takes an
+The `KiteDatabase.createQuery` method is similar to `SupportSQLiteDatabase.query` except it takes an
 additional parameter of table(s) on which to listen for changes. Subscribe to the returned
-`Observable<Query>` which will immediately notify with a `Query` to run.
+`Flow<Query>` which will immediately notify with a `Query` to run.
 
-```java
-Observable<Query> users = db.createQuery("users", "SELECT * FROM users");
-users.subscribe(new Consumer<Query>() {
-  @Override public void accept(Query query) {
-    Cursor cursor = query.run();
+```
+val users: Flow<Query> = db.createQuery("users", "SELECT * FROM users")
+users.collect {
+    val cursor = query.run();
     // TODO parse data...
-  }
-});
+}
 ```
 
 Unlike a traditional `query`, updates to the specified table(s) will trigger additional
 notifications for as long as you remain subscribed to the observable. This means that when you
 insert, update, or delete data, any subscribed queries will update with the new data instantly.
 
-```java
-final AtomicInteger queries = new AtomicInteger();
-users.subscribe(new Consumer<Query>() {
-  @Override public void accept(Query query) {
-    queries.getAndIncrement();
-  }
-});
-System.out.println("Queries: " + queries.get()); // Prints 1
+```
+val queries = AtomicInteger()
+users.collect {
+    queries.getAndIncrement()
+}
+println("Queries: ${queries.get()}") // Prints 1
 
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"));
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"));
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"));
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"))
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"))
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"))
 
-System.out.println("Queries: " + queries.get()); // Prints 4
+println("Queries: ${queries.get()}") // Prints 4
 ```
 
-In the previous example we re-used the `BriteDatabase` object "db" for inserts. All insert, update,
+In the previous example we re-used the `KiteDatabase` object "db" for inserts. All insert, update,
 or delete operations must go through this object in order to correctly notify subscribers.
 
-Unsubscribe from the returned `Subscription` to stop getting updates.
+Cancel the collector scope for the returned `Flow` to stop getting updates.
 
-```java
-final AtomicInteger queries = new AtomicInteger();
-Subscription s = users.subscribe(new Consumer<Query>() {
-  @Override public void accept(Query query) {
-    queries.getAndIncrement();
+```
+val queries = AtomicInteger()
+val queryCollector = launch {
+  users.collect {
+    queries.getAndIncrement()
   }
-});
-System.out.println("Queries: " + queries.get()); // Prints 1
+}
+System.out.println("Queries: ${queries.get()}") // Prints 1
 
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"));
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"));
-s.unsubscribe();
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"))
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"))
+queryCollector.cancel()
 
-db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"));
+db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"))
 
-System.out.println("Queries: " + queries.get()); // Prints 3
+println("Queries: ${queries.get()}") // Prints 3
 ```
 
 Use transactions to prevent large changes to the data from spamming your subscribers.
 
-```java
-final AtomicInteger queries = new AtomicInteger();
-users.subscribe(new Consumer<Query>() {
-  @Override public void accept(Query query) {
-    queries.getAndIncrement();
-  }
-});
-System.out.println("Queries: " + queries.get()); // Prints 1
+```
+val queries = AtomicInteger()
+users.collect {
+    queries.getAndIncrement()
+}
+println("Queries: ${queries.get()}") // Prints 1
 
-Transaction transaction = db.newTransaction();
-try {
-  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"));
-  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"));
-  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"));
-  transaction.markSuccessful();
-} finally {
-  transaction.end();
+val transaction = db.withTransaction {
+  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("jw", "Jake Wharton"))
+  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("mattp", "Matt Precious"))
+  db.insert("users", SQLiteDatabase.CONFLICT_ABORT, createUser("strong", "Alec Strong"))
 }
 
-System.out.println("Queries: " + queries.get()); // Prints 2
+println("Queries: ${queries.get()}") // Prints 2
 ```
-*Note: You can also use try-with-resources with a `Transaction` instance.*
+Since queries are just regular Kotlin `Flow` objects, operators can also be used to
+control the frequency of notifications to collectors.
 
-Since queries are just regular RxJava `Observable` objects, operators can also be used to
-control the frequency of notifications to subscribers.
-
-```java
-users.debounce(500, MILLISECONDS).subscribe(new Consumer<Query>() {
-  @Override public void accept(Query query) {
-    // TODO...
-  }
-});
+```
+users.debounce(500.milliseconds).collect {
+  //TODO...
+}
 ```
 
-The `SqlBrite` object can also wrap a `ContentResolver` for observing a query on another app's
+The `SqlKite` object can also wrap a `ContentResolver` for observing a query on another app's
 content provider.
 
-```java
-BriteContentResolver resolver = sqlBrite.wrapContentProvider(contentResolver, Schedulers.io());
-Observable<Query> query = resolver.createQuery(/*...*/);
+```
+val resolver = sqlKite.wrapContentProvider(contentResolver, Dispatchers.IO)
+val query: FLow<SqlKite.Query> = resolver.createQuery(/*...*/)
 ```
 
-The full power of RxJava's operators are available for combining, filtering, and triggering any
+The full power of Kotlin Flow's operators are available for combining, filtering, and triggering any
 number of queries and data changes.
 
 
@@ -144,13 +117,11 @@ number of queries and data changes.
 Philosophy
 ----------
 
-SQL Brite's only responsibility is to be a mechanism for coordinating and composing the notification
+SQL Kite's only responsibility is to be a mechanism for coordinating and composing the notification
 of updates to tables such that you can update queries as soon as data changes.
 
-This library is not an ORM. It is not a type-safe query mechanism. It won't serialize the same POJOs
+This library is not an ORM. It is not a type-safe query mechanism. It won't serialize the same data classes
 you use for Gson. It's not going to perform database migrations for you.
-
-Some of these features are offered by [SQL Delight][sqldelight] which can be used with SQL Brite.
 
 
 
@@ -158,22 +129,13 @@ Download
 --------
 
 ```groovy
-implementation 'com.squareup.sqlbrite3:sqlbrite:3.2.0'
+implementation 'TODO'
 ```
-
-For the 'kotlin' module that adds extension functions to `Observable<Query>`:
-```groovy
-implementation 'com.squareup.sqlbrite3:sqlbrite-kotlin:3.2.0'
-```
-
-
-Snapshots of the development version are available in [Sonatype's `snapshots` repository][snap].
-
-
 
 License
 -------
 
+    Copyright 2021 Frank Egan
     Copyright 2015 Square, Inc.
 
     Licensed under the Apache License, Version 2.0 (the "License");
@@ -188,9 +150,3 @@ License
     See the License for the specific language governing permissions and
     limitations under the License.
 
-
-
-
-
- [snap]: https://oss.sonatype.org/content/repositories/snapshots/
- [sqldelight]: https://github.com/square/sqldelight/
