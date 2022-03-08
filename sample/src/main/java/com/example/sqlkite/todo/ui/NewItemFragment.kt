@@ -34,7 +34,7 @@ class NewItemFragment : DialogFragment() {
     private lateinit var name: EditText
 
     private val listId: Long
-        get() = arguments!!.getLong(KEY_LIST_ID)
+        get() = requireArguments().getLong(KEY_LIST_ID)
 
     override fun onCreateDialog(savedInstanceState: Bundle?): Dialog {
         val context: Context? = activity

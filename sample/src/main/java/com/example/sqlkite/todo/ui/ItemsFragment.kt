@@ -49,7 +49,7 @@ class ItemsFragment : Fragment() {
     private var emptyView: View? = null
 
     private val listId: Long
-        get() = arguments!!.getLong(KEY_LIST_ID)
+        get() = requireArguments().getLong(KEY_LIST_ID)
 
     override fun onAttach(context: Context) {
         check(context is Listener) { "Activity must implement fragment Listener." }
