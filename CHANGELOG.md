@@ -1,5 +1,10 @@
 Change Log
 ==========
+Version 4.0.0 *(2022-03-10)*
+----------------------------
+
+ * Top down refactor to Kotlin and first release as SQL Kite
+
 
 Version 3.2.0 *(2018-03-05)*
 ----------------------------
