@@ -1,11 +1,15 @@
 Change Log
 ==========
+Version 4.0.3 *(2022-03-12)*
+----------------------------
+
+ * Even More Jitpack fixes
+
 
 Version 4.0.2 *(2022-03-12)*
 ----------------------------
 
  * More Jitpack fixes
-
 
 
 Version 4.0.1 *(2022-03-12)*
