@@ -11,6 +11,3 @@ reports
 
 # Apple
 .DS_Store
-
-#Key Store
-keystore.properties
