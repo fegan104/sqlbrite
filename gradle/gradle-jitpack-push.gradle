@@ -1,0 +1,14 @@
+apply plugin: 'maven-publish'
+
+afterEvaluate { project ->
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = "com.github.fegan104"
+                artifactId = "sqlkite"
+                version = VERSION_NAME
+            }
+        }
+    }
+}

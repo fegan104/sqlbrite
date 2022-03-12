@@ -2,35 +2,35 @@ apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
 
 dependencies {
-  api rootProject.ext.kotlinStdLib
-  api rootProject.ext.kotlinCoroutines
-  api rootProject.ext.supportSqlite
-  implementation rootProject.ext.supportAnnotations
+    api rootProject.ext.kotlinStdLib
+    api rootProject.ext.kotlinCoroutines
+    api rootProject.ext.supportSqlite
+    implementation rootProject.ext.supportAnnotations
 
-  androidTestImplementation 'app.cash.turbine:turbine:0.7.0'
-  androidTestImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.5.2'
-  androidTestImplementation 'androidx.test:rules:1.4.0'
-  androidTestImplementation rootProject.ext.supportTestRunner
-  androidTestImplementation rootProject.ext.truth
-  androidTestImplementation rootProject.ext.supportSqliteFramework
+    androidTestImplementation 'app.cash.turbine:turbine:0.7.0'
+    androidTestImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.5.2'
+    androidTestImplementation 'androidx.test:rules:1.4.0'
+    androidTestImplementation rootProject.ext.supportTestRunner
+    androidTestImplementation rootProject.ext.truth
+    androidTestImplementation rootProject.ext.supportSqliteFramework
 
 
-  lintChecks project(':sqlkite-lint')
+    lintChecks project(':sqlkite-lint')
 }
 
 android {
-  compileSdkVersion versions.compileSdk
+    compileSdkVersion versions.compileSdk
 
-  defaultConfig {
-    minSdkVersion versions.minSdk
+    defaultConfig {
+        minSdkVersion versions.minSdk
 
-    testInstrumentationRunner 'android.support.test.runner.AndroidJUnitRunner'
-  }
+        testInstrumentationRunner 'android.support.test.runner.AndroidJUnitRunner'
+    }
 
-  compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_8
-    targetCompatibility JavaVersion.VERSION_1_8
-  }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
     packagingOptions {
         resources {
             excludes += ['META-INF/AL2.0', 'META-INF/ASL2.0', 'META-INF/LGPL2.1']
@@ -44,9 +44,11 @@ android {
     }
 
     // TODO replace with https://issuetracker.google.com/issues/72050365 once released.
-  libraryVariants.all {
-    it.generateBuildConfig.enabled = false
-  }
+    libraryVariants.all {
+        it.generateBuildConfig.enabled = false
+    }
 }
 
-apply from: rootProject.file('gradle/gradle-mvn-push.gradle')
+apply from: rootProject.file('gradle/gradle-jitpack-push.gradle')
+//TODO figure out how to make this work for this new set up
+//apply from: rootProject.file('gradle/gradle-mvn-push.gradle')
