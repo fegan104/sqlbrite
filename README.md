@@ -1,5 +1,7 @@
 SQL Kite 🪁🍃
 =========
+[![](https://jitpack.io/v/fegan104/sqlkite.svg)](https://jitpack.io/#fegan104/sqlkite)
+
 
 A lightweight Kotlin library that makes working with `SupportSQLiteOpenHelper` & `ContentResolver` a breeze by introducing reactive
 Flow based queries.
@@ -129,7 +131,13 @@ Download
 --------
 
 ```groovy
-implementation 'TODO'
+//Project level build.gradle
+repositories {
+    maven { url 'https://jitpack.io' }
+}
+
+//App level build.gradle
+implementation 'com.github.fegan104:sqlkite:4.0.4'
 ```
 
 License
