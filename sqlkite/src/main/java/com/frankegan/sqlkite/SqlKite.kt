@@ -15,12 +15,12 @@
  */
 package com.frankegan.sqlkite
 
-import android.arch.persistence.db.SupportSQLiteOpenHelper
 import android.content.ContentResolver
 import android.database.Cursor
-import android.support.annotation.CheckResult
-import android.support.annotation.WorkerThread
 import android.util.Log
+import androidx.annotation.CheckResult
+import androidx.annotation.WorkerThread
+import androidx.sqlite.db.SupportSQLiteOpenHelper
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow

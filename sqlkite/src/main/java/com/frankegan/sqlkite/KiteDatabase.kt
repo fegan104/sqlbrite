@@ -15,18 +15,14 @@
  */
 package com.frankegan.sqlkite
 
-import android.arch.persistence.db.SimpleSQLiteQuery
-import android.arch.persistence.db.SupportSQLiteDatabase
-import android.arch.persistence.db.SupportSQLiteOpenHelper
-import android.arch.persistence.db.SupportSQLiteQuery
-import android.arch.persistence.db.SupportSQLiteStatement
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteTransactionListener
-import android.support.annotation.CheckResult
-import android.support.annotation.IntDef
-import android.support.annotation.WorkerThread
+import androidx.annotation.CheckResult
+import androidx.annotation.IntDef
+import androidx.annotation.WorkerThread
+import androidx.sqlite.db.*
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asContextElement
@@ -760,12 +756,12 @@ class KiteDatabase internal constructor(
     }
 
     @IntDef(
-        SQLiteDatabase.CONFLICT_ABORT.toLong(),
-        SQLiteDatabase.CONFLICT_FAIL.toLong(),
-        SQLiteDatabase.CONFLICT_IGNORE.toLong(),
-        SQLiteDatabase.CONFLICT_NONE.toLong(),
-        SQLiteDatabase.CONFLICT_REPLACE.toLong(),
-        SQLiteDatabase.CONFLICT_ROLLBACK.toLong()
+        SQLiteDatabase.CONFLICT_ABORT,
+        SQLiteDatabase.CONFLICT_FAIL,
+        SQLiteDatabase.CONFLICT_IGNORE,
+        SQLiteDatabase.CONFLICT_NONE,
+        SQLiteDatabase.CONFLICT_REPLACE,
+        SQLiteDatabase.CONFLICT_ROLLBACK
     )
     @kotlin.annotation.Retention(AnnotationRetention.SOURCE)
     private annotation class ConflictAlgorithm

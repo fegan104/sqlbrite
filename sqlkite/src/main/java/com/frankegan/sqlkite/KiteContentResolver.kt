@@ -21,7 +21,7 @@ import android.database.Cursor
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import android.support.annotation.CheckResult
+import androidx.annotation.CheckResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.channels.trySendBlocking
