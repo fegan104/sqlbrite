@@ -19,9 +19,9 @@ import dagger.Provides
 import com.frankegan.sqlkite.SqlKite
 import timber.log.Timber
 import com.frankegan.sqlkite.KiteDatabase
-import android.arch.persistence.db.SupportSQLiteOpenHelper
-import android.arch.persistence.db.framework.FrameworkSQLiteOpenHelperFactory
 import android.content.Context
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import dagger.Module
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext

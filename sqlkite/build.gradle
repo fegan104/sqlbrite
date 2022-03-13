@@ -1,5 +1,6 @@
 apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
+apply plugin: 'org.jetbrains.dokka'
 
 dependencies {
     api rootProject.ext.kotlinStdLib
@@ -43,12 +44,17 @@ android {
         textReport true
     }
 
-    // TODO replace with https://issuetracker.google.com/issues/72050365 once released.
-    libraryVariants.all {
-        it.generateBuildConfig.enabled = false
+    publishing {
+        singleVariant('release') {
+//            groupId = "com.github.fegan104"
+//            artifactId = "sqlkite"
+            version = VERSION_NAME
+            withSourcesJar()
+            withJavadocJar()
+        }
+    }
+
+    buildFeatures {
+        buildConfig = false
     }
 }
-
-apply from: rootProject.file('gradle/gradle-jitpack-push.gradle')
-//TODO figure out how to make this work for this new set up
-//apply from: rootProject.file('gradle/gradle-mvn-push.gradle')
