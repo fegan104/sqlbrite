@@ -50,7 +50,6 @@ android {
 
     publishing {
         singleVariant('release') {
-            version = VERSION_NAME
             withSourcesJar()
             withJavadocJar()
         }
@@ -58,5 +57,18 @@ android {
 
     buildFeatures {
         buildConfig = false
+    }
+}
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+                groupId = "com.github.fegan104"
+                artifactId = "sqlkite"
+                version = VERSION_NAME
+            }
+        }
     }
 }
