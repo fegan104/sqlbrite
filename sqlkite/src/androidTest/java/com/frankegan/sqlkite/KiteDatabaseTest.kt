@@ -15,33 +15,29 @@
  */
 package com.frankegan.sqlkite
 
+import android.annotation.SuppressLint
 import android.annotation.TargetApi
-import android.arch.persistence.db.SimpleSQLiteQuery
-import android.arch.persistence.db.SupportSQLiteDatabase
-import android.arch.persistence.db.SupportSQLiteOpenHelper
-import android.arch.persistence.db.SupportSQLiteStatement
-import android.arch.persistence.db.framework.FrameworkSQLiteOpenHelperFactory
 import android.content.ContentValues
 import android.database.SQLException
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import android.os.Build
-import android.support.test.InstrumentationRegistry
-import android.support.test.filters.SdkSuppress
-import android.support.test.runner.AndroidJUnit4
-import android.util.Log
+import androidx.sqlite.db.SimpleSQLiteQuery
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.SupportSQLiteStatement
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.filters.SdkSuppress
+import androidx.test.internal.runner.junit4.AndroidJUnit4ClassRunner
 import app.cash.turbine.test
 import com.google.common.truth.Truth
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.takeWhile
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.newSingleThreadContext
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineDispatcher
 import kotlinx.coroutines.test.runBlockingTest
 import org.junit.Assert
@@ -54,13 +50,13 @@ import java.io.Closeable
 import java.io.IOException
 import java.lang.Thread.sleep
 import java.util.ArrayList
-import java.util.Arrays
 import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 
-@RunWith(AndroidJUnit4::class)
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(AndroidJUnit4ClassRunner::class)
 class KiteDatabaseTest {
 
     private val testDb = TestDb()
@@ -78,7 +74,7 @@ class KiteDatabaseTest {
     fun setUp() {
         killSwitch = true
         val configuration = SupportSQLiteOpenHelper.Configuration
-            .builder(InstrumentationRegistry.getContext())
+            .builder(ApplicationProvider.getApplicationContext())
             .callback(testDb)
             .name(dbFolder.newFile().path)
             .build()
@@ -87,7 +83,6 @@ class KiteDatabaseTest {
         real = helper.writableDatabase
         val logger: SqlKite.Logger = SqlKite.Logger { message ->
             logs.add(message)
-            Log.d("SQLKite", message)
         }
 
         db = KiteDatabase(helper, logger, dispatcher) { upstream ->
@@ -161,7 +156,7 @@ class KiteDatabaseTest {
     @Test
     fun closePropagates() {
         db.close()
-        Truth.assertThat(real?.isOpen).isFalse()
+        Truth.assertThat(real.isOpen).isFalse()
     }
 
     @Test
@@ -402,7 +397,7 @@ class KiteDatabaseTest {
     @Test
     fun queryMultipleTablesObservesChangesOnlyOnce() = runBlockingTest {
         // Employee table is in this list twice. We should still only be notified once for a change.
-        val tables = Arrays.asList(TestDb.TABLE_EMPLOYEE, TestDb.TABLE_MANAGER, TestDb.TABLE_EMPLOYEE)
+        val tables = listOf(TestDb.TABLE_EMPLOYEE, TestDb.TABLE_MANAGER, TestDb.TABLE_EMPLOYEE)
         db.createQuery(tables, TestDb.SELECT_MANAGER_LIST).test {
             awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
@@ -1054,12 +1049,10 @@ class KiteDatabaseTest {
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
             val transaction = db.newTransaction()
-            try {
+            transaction.use { transaction ->
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
                 transaction.markSuccessful()
-            } finally {
-                transaction.close() // Transactions should not throw on close().
             }
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
@@ -1072,6 +1065,7 @@ class KiteDatabaseTest {
     }
 
     @Test
+    @SuppressLint("CheckResult")
     fun queryCreatedDuringTransactionThrows() {
         db.newTransaction()
         try {
@@ -1095,6 +1089,7 @@ class KiteDatabaseTest {
     }
 
     @Test
+    @SuppressLint("CheckResult")
     fun querySubscribedToDuringTransactionThrows() = runBlockingTest {
         val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
         db.newTransaction()

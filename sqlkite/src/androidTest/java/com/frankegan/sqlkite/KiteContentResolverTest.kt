@@ -24,7 +24,6 @@ import android.net.Uri
 import app.cash.turbine.test
 import com.google.common.truth.Truth
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -46,17 +45,15 @@ class KiteContentResolverTest {
     private lateinit var db: KiteContentResolver
 
     @get:Rule
-    lateinit var providerRule: ProviderTestRule
+    val providerRule: ProviderTestRule = ProviderTestRule
+        .Builder(TestContentProvider::class.java, AUTHORITY.authority!!)
+        .build()
 
     private val contentResolver: ContentResolver
         get() = providerRule.resolver
 
     @Before
     fun setUp() {
-        providerRule = ProviderTestRule
-            .Builder(TestContentProvider::class.java, AUTHORITY.authority!!)
-            .build()
-
         val logger: SqlKite.Logger = SqlKite.Logger {
             logs.add(it)
         }
@@ -69,7 +66,7 @@ class KiteContentResolverTest {
     @Test
     fun testLoggerEnabled() = runBlocking {
         db.setLoggingEnabled(true)
-        db.createQuery(TABLE).drop(1).test {
+        db.createQuery(TABLE).test {
             contentResolver.insert(TABLE, values("key1", "value1"))
             awaitItemAndRunQuery()
                 .hasRow("key1", "value1")
@@ -88,7 +85,7 @@ class KiteContentResolverTest {
 
     @Test
     fun testCreateQueryObservesInsert() = runBlocking {
-        db.createQuery(TABLE).drop(1).test {
+        db.createQuery(TABLE).test {
             contentResolver.insert(TABLE, values("key1", "val1"))
             awaitItemAndRunQuery()
                 .hasRow("key1", "val1")
@@ -97,21 +94,26 @@ class KiteContentResolverTest {
     }
 
     @Test
-    fun testCreateQueryObservesUpdate() = runBlocking {
+    fun testCreateQueryObservesUpdate() = runBlockingTest {
         contentResolver.insert(TABLE, values("key1", "val1"))
         db.createQuery(TABLE).test {
             awaitItemAndRunQuery().hasRow("key1", "val1").isExhausted()
-            contentResolver.update(TABLE, values("key1", "val2"), null, null)
+        }
+
+        contentResolver.update(TABLE, values("key1", "val2"), null, null)
+        db.createQuery(TABLE).test {
             awaitItemAndRunQuery().hasRow("key1", "val2").isExhausted()
         }
     }
 
     @Test
-    fun testCreateQueryObservesDelete() = runBlocking {
+    fun testCreateQueryObservesDelete() = runBlockingTest {
         contentResolver.insert(TABLE, values("key1", "val1"))
         db.createQuery(TABLE).test {
             awaitItemAndRunQuery().hasRow("key1", "val1").isExhausted()
             contentResolver.delete(TABLE, null, null)
+        }
+        db.createQuery(TABLE).test {
             awaitItemAndRunQuery().isExhausted()
         }
     }
@@ -158,7 +160,7 @@ class KiteContentResolverTest {
         override fun insert(uri: Uri, values: ContentValues?): Uri? {
             values ?: return null
             storage[values.getAsString(KEY)] = values.getAsString(VALUE)
-            requireContext().contentResolver.notifyChange(uri, null)
+            context!!.contentResolver.notifyChange(uri, null)
             return Uri.parse(AUTHORITY.toString() + "/" + values.getAsString(KEY))
         }
 
@@ -172,14 +174,14 @@ class KiteContentResolverTest {
             for (key in storage.keys) {
                 storage[key] = values.getAsString(VALUE)
             }
-            requireContext().contentResolver.notifyChange(uri, null)
+            context!!.contentResolver.notifyChange(uri, null)
             return storage.size
         }
 
         override fun delete(uri: Uri, selection: String?, selectionArgs: Array<String>?): Int {
             val result = storage.size
             storage.clear()
-            requireContext().contentResolver.notifyChange(uri, null)
+            context!!.contentResolver.notifyChange(uri, null)
             return result
         }
 

@@ -15,10 +15,11 @@
  */
 package com.frankegan.sqlkite
 
-import android.arch.persistence.db.SupportSQLiteOpenHelper
-import android.arch.persistence.db.framework.FrameworkSQLiteOpenHelperFactory
+
 import android.database.Cursor
-import android.support.test.InstrumentationRegistry
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth
 import com.frankegan.sqlkite.TestDb.Employee
 import kotlinx.coroutines.flow.Flow
@@ -36,7 +37,7 @@ class QueryTest {
 
     @Before
     fun setUp() {
-        val configuration = SupportSQLiteOpenHelper.Configuration.builder(InstrumentationRegistry.getContext())
+        val configuration = SupportSQLiteOpenHelper.Configuration.builder(ApplicationProvider.getApplicationContext())
             .callback(TestDb())
             .build()
         val factory: SupportSQLiteOpenHelper.Factory = FrameworkSQLiteOpenHelperFactory()

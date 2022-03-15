@@ -2,7 +2,7 @@ package com.frankegan.sqlkite
 
 import android.database.Cursor
 import android.database.MatrixCursor
-import android.support.test.runner.AndroidJUnit4
+import androidx.test.internal.runner.junit4.AndroidJUnit4ClassRunner
 import com.google.common.truth.Truth
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
@@ -11,7 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.concurrent.atomic.AtomicInteger
 
-@RunWith(AndroidJUnit4::class)
+@RunWith(AndroidJUnit4ClassRunner::class)
 class SqlKiteTest {
 
     @Test
