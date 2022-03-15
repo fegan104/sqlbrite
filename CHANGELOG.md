@@ -1,5 +1,11 @@
 Change Log
 ==========
+
+Version 4.0.5 *(2022-03-14)*
+----------------------------
+
+ * Updated to Android X dependencies for library.
+
 Version 4.0.4 *(2022-03-12)*
 ----------------------------
 

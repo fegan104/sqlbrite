@@ -108,7 +108,7 @@ content provider.
 
 ```
 val resolver = sqlKite.wrapContentProvider(contentResolver, Dispatchers.IO)
-val query: FLow<SqlKite.Query> = resolver.createQuery(/*...*/)
+val query: Flow<SqlKite.Query> = resolver.createQuery(/*...*/)
 ```
 
 The full power of Kotlin Flow's operators are available for combining, filtering, and triggering any
