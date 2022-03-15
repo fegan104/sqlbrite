@@ -1,6 +1,7 @@
 apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'org.jetbrains.dokka'
+apply plugin: 'maven-publish'
 
 dependencies {
     api rootProject.ext.kotlinStdLib
@@ -21,6 +22,8 @@ dependencies {
 }
 
 android {
+    namespace = "com.frankegan.sqlkite"
+
     compileSdkVersion versions.compileSdk
 
     defaultConfig {
@@ -47,8 +50,6 @@ android {
 
     publishing {
         singleVariant('release') {
-//            groupId = "com.github.fegan104"
-//            artifactId = "sqlkite"
             version = VERSION_NAME
             withSourcesJar()
             withJavadocJar()

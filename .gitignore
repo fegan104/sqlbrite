@@ -11,3 +11,5 @@ reports
 
 # Apple
 .DS_Store
+/sample/stdout
+/sqlkite/stdout
