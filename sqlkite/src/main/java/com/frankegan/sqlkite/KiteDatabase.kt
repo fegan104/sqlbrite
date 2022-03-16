@@ -57,8 +57,8 @@ class KiteDatabase internal constructor(
     private val queryTransformer: (Flow<SqlKite.Query>) -> Flow<SqlKite.Query>
 ) : Closeable {
 
-    // Package-private to avoid synthetic accessor method for 'transaction' instance.
-    val transactions = ThreadLocal<SqliteTransaction?>()
+    private val transactions = ThreadLocal<SqliteTransaction?>()
+
     private val suspendingTransactionId = ThreadLocal<Int>()
 
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
@@ -98,9 +98,8 @@ class KiteDatabase internal constructor(
         check(suspendingTransactionId.get() == null && transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
     }
 
-    // Package-private to avoid synthetic accessor method for 'transaction' instance.
     @Volatile
-    var logging = false
+    private var logging = false
 
     /**
      * Control whether debug logging is enabled.
@@ -360,7 +359,6 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.query
      */
     @CheckResult
-    @WorkerThread
     suspend fun query(sql: String, vararg args: Any): Cursor {
         val cursor: Cursor = withQueryOrTransactionContext {
             readableDatabase.query(sql, args)
@@ -377,7 +375,6 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.query
      */
     @CheckResult
-    @WorkerThread
     suspend fun query(query: SupportSQLiteQuery): Cursor = withContext(queryDispatcher) {
         val cursor: Cursor = withQueryOrTransactionContext {
             readableDatabase.query(query)
@@ -392,7 +389,6 @@ class KiteDatabase internal constructor(
      * Insert a row into the specified `table` and notify any subscribed queries.
      * @see SupportSQLiteDatabase.insert
      */
-    @WorkerThread
     suspend fun insert(
         table: String,
         @ConflictAlgorithm conflictAlgorithm: Int,
@@ -422,7 +418,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.delete
      */
-    @WorkerThread
     suspend fun delete(
         table: String,
         whereClause: String?,
@@ -452,7 +447,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.update
      */
-    @WorkerThread
     suspend fun update(
         table: String, @ConflictAlgorithm conflictAlgorithm: Int,
         values: ContentValues, whereClause: String?, vararg whereArgs: String?
@@ -486,7 +480,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun execute(sql: String) = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n  sql: %s", indentSql(sql))
         writableDatabase.execSQL(sql)
@@ -502,7 +495,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun execute(sql: String, vararg args: Any?) = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n  sql: %s\n  args: %s", indentSql(sql), args.contentToString())
         writableDatabase.execSQL(sql, args)
@@ -518,7 +510,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun executeAndTrigger(table: String, sql: String?) = withQueryOrTransactionContext {
         executeAndTrigger(setOf(table), sql!!)
     }
@@ -528,7 +519,6 @@ class KiteDatabase internal constructor(
      *
      * @see KiteDatabase.executeAndTrigger
      */
-    @WorkerThread
     suspend fun executeAndTrigger(tables: Set<String>, sql: String) = withQueryOrTransactionContext {
         execute(sql)
         sendTableTrigger(tables)
@@ -617,16 +607,6 @@ class KiteDatabase internal constructor(
         rowId
     }
 
-    //TODO triple check this logic
-    fun assertNotSuspendingTransaction() {
-        check(writableDatabase.inTransaction() || suspendingTransactionId.get() == null) {
-            ("""
-                Cannot access database on a different coroutine 
-                context inherited from a suspending transaction.
-                """.trimIndent())
-        }
-    }
-
     private suspend fun createTransactionContext(): CoroutineContext {
         val controlJob = Job()
         // make sure to tie the control job to this context to avoid blocking the transaction if
@@ -703,7 +683,6 @@ class KiteDatabase internal constructor(
          *
          * @see SupportSQLiteDatabase.endTransaction
          */
-        @WorkerThread
         fun end()
 
         /**
@@ -714,7 +693,6 @@ class KiteDatabase internal constructor(
          *
          * @see SupportSQLiteDatabase.setTransactionSuccessful
          */
-        @WorkerThread
         fun markSuccessful()
 
         /**
@@ -728,7 +706,6 @@ class KiteDatabase internal constructor(
          *
          * @see SupportSQLiteDatabase.yieldIfContendedSafely
          */
-        @WorkerThread
         fun yieldIfContendedSafely(): Boolean
 
         /**
@@ -745,13 +722,11 @@ class KiteDatabase internal constructor(
          *
          * @see SupportSQLiteDatabase.yieldIfContendedSafely
          */
-        @WorkerThread
         fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean
 
         /**
          * Equivalent to calling [.end]
          */
-        @WorkerThread
         override fun close()
     }
 
