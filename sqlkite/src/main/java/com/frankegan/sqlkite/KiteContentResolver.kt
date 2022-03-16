@@ -94,15 +94,14 @@ class KiteContentResolver internal constructor(
                 if (logging) {
                     val tookMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos)
                     log(
-                        """QUERY (%sms)
+                        """QUERY (${tookMillis}ms)
                         uri: $uri
                         projection: $projection
                         selection: $selection
                         selectionArgs: ${Arrays.toString(selectionArgs)}
                         sortOrder: $sortOrder
                         notifyForDescendants: $notifyForDescendants
-                        """.trimIndent(),
-                        tookMillis
+                        """.trimIndent()
                     )
                 }
                 return cursor
