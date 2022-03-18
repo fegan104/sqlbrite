@@ -46,13 +46,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
-import java.io.Closeable
 import java.io.IOException
-import java.lang.Thread.sleep
+import java.lang.Exception
 import java.util.ArrayList
 import java.util.Collections
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -940,32 +937,6 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun transactionOnlyNotifiesOnce() = runBlockingTest {
-        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .isExhausted()
-            val transaction = db.newTransaction()
-            try {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-                transaction.markSuccessful()
-            } finally {
-                transaction.end()
-            }
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-        }
-    }
-
-    @Test
     fun transactionOnlyNotifiesOnceAndTransactionDoesNotThrow() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
             awaitItemAndRunQuery()
@@ -990,87 +961,6 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun transactionCreatedFromTransactionNotificationWorks() = runBlockingTest {
-        // Tests the case where a transaction is created in the subscriber to a query which gets
-        // notified as the result of another transaction being committed. With improper ordering, this
-        // can result in creating a new transaction before the old is committed on the underlying DB.
-        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            db.newTransaction().end()
-            val transaction = db.newTransaction()
-            try {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                transaction.markSuccessful()
-            } finally {
-                transaction.end()
-            }
-            awaitItem()
-            awaitItem()
-        }
-    }
-
-    @Test
-    @Throws(IOException::class)
-    fun transactionIsCloseable() = runBlockingTest {
-        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .isExhausted()
-            val transaction = db.newTransaction()
-            val closeableTransaction: Closeable = transaction // Verify type is implemented.
-            closeableTransaction.use {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-                transaction.markSuccessful()
-            }
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-        }
-    }
-
-    @Test
-    fun transactionDoesNotThrow() = runBlockingTest {
-        db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .isExhausted()
-            val transaction = db.newTransaction()
-            transaction.use { transaction ->
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-                transaction.markSuccessful()
-            }
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-        }
-    }
-
-    @Test
-    @SuppressLint("CheckResult")
-    fun queryCreatedDuringTransactionThrows() {
-        db.newTransaction()
-        try {
-            db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-            Assert.fail()
-        } catch (e: IllegalStateException) {
-            Truth.assertThat(e.message).startsWith("Cannot create observable query in transaction.")
-        }
-    }
-
-    @Test
     fun queryCreatedDuringWithTransactionThrows() = runBlocking {
         db.withTransaction {
             try {
@@ -1079,19 +969,6 @@ class KiteDatabaseTest {
             } catch (e: IllegalStateException) {
                 Truth.assertThat(e.message).startsWith("Cannot create observable query in transaction.")
             }
-        }
-    }
-
-    @Test
-    @SuppressLint("CheckResult")
-    fun querySubscribedToDuringTransactionThrows() = runBlockingTest {
-        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-        db.newTransaction()
-        query.test {
-            awaitItem()
-            Truth.assertThat(awaitError())
-                .hasMessageThat()
-                .contains("Cannot subscribe to observable query in a transaction.")
         }
     }
 
@@ -1105,61 +982,6 @@ class KiteDatabaseTest {
                     .hasMessageThat()
                     .contains("Cannot subscribe to observable query in a transaction.")
             }
-        }
-    }
-
-    @Test
-    fun callingEndMultipleTimesThrows() = runBlockingTest {
-        val transaction = db.newTransaction()
-        transaction.end()
-        try {
-            transaction.end()
-            Assert.fail()
-        } catch (e: IllegalStateException) {
-            Truth.assertThat(e).hasMessageThat().isEqualTo("Not in transaction.")
-        }
-    }
-
-    @Test
-    fun querySubscribedToDuringTransactionOnDifferentThread() {
-        val transaction = db.newTransaction()
-        val latch = CountDownLatch(1)
-        object : Thread() {
-            override fun run() = runBlocking {
-                db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
-                    awaitItemAndRunQuery()
-                        .hasRow("alice", "Alice Allison")
-                        .hasRow("bob", "Bob Bobberson")
-                        .hasRow("eve", "Eve Evenson")
-                        .isExhausted()
-                }
-                latch.countDown()
-            }
-        }.start()
-        sleep(500) // Wait for the thread to block on initial query.
-        transaction.end() // Allow other queries to continue.
-        latch.await(500, TimeUnit.MILLISECONDS) // Wait for thread to observe initial query.
-    }
-
-    @Test
-    fun queryCreatedBeforeTransactionButSubscribedAfter() = runBlockingTest {
-        val query = db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES)
-        val transaction = db.newTransaction()
-        try {
-            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-            transaction.markSuccessful()
-        } finally {
-            transaction.end()
-        }
-        query.test {
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
         }
     }
 
@@ -1182,24 +1004,19 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun synchronousQueryDuringTransaction() = runBlockingTest {
-        val transaction = db.newTransaction()
-        try {
-            transaction.markSuccessful()
+    fun synchronousQueryDuringTransaction() = runBlocking {
+        db.withTransaction {
             db.query(TestDb.SELECT_EMPLOYEES)
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
-        } finally {
-            transaction.end()
         }
     }
 
     @Test
-    fun synchronousQueryDuringTransactionSeesChanges() = runBlockingTest {
-        val transaction = db.newTransaction()
-        try {
+    fun synchronousQueryDuringTransactionSeesChanges() = runBlocking {
+        db.withTransaction {
             db.query(TestDb.SELECT_EMPLOYEES)
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
@@ -1214,72 +1031,33 @@ class KiteDatabaseTest {
                 .hasRow("john", "John Johnson")
                 .hasRow("nick", "Nick Nickers")
                 .isExhausted()
-            transaction.markSuccessful()
-        } finally {
-            transaction.end()
         }
     }
 
     @Test
-    fun synchronousQueryWithSupportSQLiteQueryDuringTransaction() = runBlockingTest {
-        val transaction = db.newTransaction()
-        try {
-            transaction.markSuccessful()
+    fun synchronousQueryWithSupportSQLiteQueryDuringTransaction() = runBlocking {
+        db.withTransaction {
             db.query(SimpleSQLiteQuery(TestDb.SELECT_EMPLOYEES))
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
-        } finally {
-            transaction.end()
         }
     }
 
     @Test
-    fun synchronousQueryWithSupportSQLiteQueryDuringTransactionSeesChanges() = runBlockingTest {
-        val transaction = db.newTransaction()
-        try {
-            db.query(SimpleSQLiteQuery(TestDb.SELECT_EMPLOYEES))
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .isExhausted()
-            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-            db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-            db.query(SimpleSQLiteQuery(TestDb.SELECT_EMPLOYEES))
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-            transaction.markSuccessful()
-        } finally {
-            transaction.end()
-        }
-    }
-
-    @Test
-    fun nestedTransactionsOnlyNotifyOnce() = runBlockingTest {
+    fun nestedTransactionsOnlyNotifyOnce() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
-            val transactionOuter = db.newTransaction()
-            try {
+            db.withTransaction {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                val transactionInner = db.newTransaction()
-                try {
+                db.withTransaction {
                     db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-                    transactionInner.markSuccessful()
-                } finally {
-                    transactionInner.end()
                 }
-                transactionOuter.markSuccessful()
-            } finally {
-                transactionOuter.end()
             }
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
@@ -1292,30 +1070,19 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun nestedTransactionsOnMultipleTables() = runBlockingTest {
+    fun nestedTransactionsOnMultipleTables() = runBlocking {
         db.createQuery(TestDb.BOTH_TABLES, TestDb.SELECT_MANAGER_LIST).test {
             awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
                 .isExhausted()
-            val transactionOuter = db.newTransaction()
-            try {
-                var transactionInner = db.newTransaction()
-                try {
+
+            db.withTransaction {
+                db.withTransaction {
                     db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                    transactionInner.markSuccessful()
-                } finally {
-                    transactionInner.end()
                 }
-                transactionInner = db.newTransaction()
-                try {
+                db.withTransaction {
                     db.insert(TestDb.TABLE_MANAGER, SQLiteDatabase.CONFLICT_NONE, TestDb.manager(testDb.aliceId, testDb.bobId))
-                    transactionInner.markSuccessful()
-                } finally {
-                    transactionInner.end()
                 }
-                transactionOuter.markSuccessful()
-            } finally {
-                transactionOuter.end()
             }
             awaitItemAndRunQuery()
                 .hasRow("Eve Evenson", "Alice Allison")
@@ -1325,37 +1092,33 @@ class KiteDatabaseTest {
     }
 
     @Test
-    fun emptyTransactionDoesNotNotify() = runBlockingTest {
+    fun emptyTransactionDoesNotNotify() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
-            val transaction = db.newTransaction()
-            try {
-                transaction.markSuccessful()
-            } finally {
-                transaction.end()
-            }
+            db.withTransaction { }
         }
     }
 
     @Test
-    fun transactionRollbackDoesNotNotify() = runBlockingTest {
+    fun transactionRollbackDoesNotNotify() = runBlocking {
         db.createQuery(TestDb.TABLE_EMPLOYEE, TestDb.SELECT_EMPLOYEES).test {
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
-            val transaction = db.newTransaction()
             try {
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
-                db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
-                // No call to set successful.
-            } finally {
-                transaction.end()
+                db.withTransaction {
+                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
+                    db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
+                    error("No call to set successful.")
+                }
+            } catch (e: Exception) {
+                Assert.assertTrue(e.message!!.startsWith("No call to set successful."))
             }
         }
     }
@@ -1438,5 +1201,19 @@ class KiteDatabaseTest {
         } catch (e: SQLiteException) {
             Truth.assertThat(e.message).contains("no such table: missing")
         }
+    }
+
+    @Test
+    fun inSuspendTransaction() = runBlocking {
+        Truth.assertThat(db.inSuspendingTransaction).isFalse()
+        db.withTransaction {
+            Truth.assertThat(db.inSuspendingTransaction).isTrue()
+        }
+        Truth.assertThat(db.inSuspendingTransaction).isFalse()
+        real.beginTransaction()
+        Truth.assertThat(db.inSuspendingTransaction).isTrue()
+        real.setTransactionSuccessful()
+        real.endTransaction()
+        Truth.assertThat(db.inSuspendingTransaction).isFalse()
     }
 }
