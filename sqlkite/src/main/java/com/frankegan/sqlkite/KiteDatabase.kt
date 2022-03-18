@@ -19,6 +19,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteTransactionListener
+import android.util.Log
 import androidx.annotation.CheckResult
 import androidx.annotation.IntDef
 import androidx.annotation.WorkerThread
@@ -26,21 +27,11 @@ import androidx.sqlite.db.*
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.withContext
 import java.io.Closeable
-import java.util.LinkedHashSet
-import java.util.concurrent.Executor
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
@@ -59,7 +50,7 @@ class KiteDatabase internal constructor(
 
     private val transactions = ThreadLocal<SqliteTransaction?>()
 
-    private val suspendingTransactionId = ThreadLocal<Int>()
+    private val suspendingTransactions = ThreadLocal<SqliteTransaction?>()
 
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
@@ -95,7 +86,7 @@ class KiteDatabase internal constructor(
     }
 
     private val ensureNotInTransaction = {
-        check(suspendingTransactionId.get() == null && transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
+        check(suspendingTransactions.get() == null && transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
     }
 
     @Volatile
@@ -160,10 +151,16 @@ class KiteDatabase internal constructor(
 
     fun sendTableTrigger(tables: Set<String>) {
         val transaction = transactions.get()
+        val suspendingTransaction = suspendingTransactions.get()
         if (transaction != null) {
+            Log.d("TXN", "skipping triggers for transaction adding $tables")
             transaction.addAll(tables)
+        } else if (suspendingTransaction != null) {
+            Log.d("TXN", "skipping triggers for suspendingTransaction adding ${tables.toList()}")
+            suspendingTransaction.addAll(tables)
         } else {
             if (logging) log("TRIGGER %s", tables)
+            Log.d("TXN", "sending triggers for: ${tables.toList()}")
             triggers.tryEmit(tables)
         }
     }
@@ -325,7 +322,7 @@ class KiteDatabase internal constructor(
 
     @CheckResult
     private fun createQuery(query: DatabaseQuery): Flow<SqlKite.Query> {
-        check(suspendingTransactionId.get() == null && transactions.get() == null) {
+        check(suspendingTransactions.get() == null && transactions.get() == null) {
             """
             Cannot create observable query in transaction. 
             Use query() for a query inside a transaction.
@@ -341,7 +338,7 @@ class KiteDatabase internal constructor(
     }
 
     private suspend fun <R> withQueryOrTransactionContext(block: suspend () -> R): R {
-        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransactionId.get() != null) {
+        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransactions.get() != null) {
             return block()
         }
         // Use the transaction dispatcher if we are on a transaction coroutine, otherwise
@@ -618,12 +615,38 @@ class KiteDatabase internal constructor(
         }
         val dispatcher = transactionExecutor.acquireTransactionThread(controlJob)
         val transactionElement = TransactionElement(controlJob, dispatcher)
+        Log.d("TXN", "creating transactionContext with thread local var: ${suspendingTransactions.get()}")
+        val suspendingTransaction = SqliteTransaction(suspendingTransactions.get())
         val threadLocalElement =
-            suspendingTransactionId.asContextElement(controlJob.hashCode())
+            suspendingTransactions.asContextElement(suspendingTransaction)
+        Log.d("TXN", "creating transactionContext with thread local element: $suspendingTransaction")
         return dispatcher + transactionElement + threadLocalElement
     }
 
-    suspend fun <R> withTransaction(
+    /**
+     * Begins a suspending transaction in exclusive mode.
+     *
+     * @param block The suspending function that will be run inside of a transaction.
+     * Coroutine builder functions like `async` and `launch` can be used inside of the block.
+     */
+    suspend fun <R> withTransaction(block: suspend () -> R): R = withTransaction(
+        beginStatement = SupportSQLiteDatabase::beginTransactionWithListener,
+        block
+    )
+
+    /**
+     * Begins a suspending transaction in immediate mode.
+     *
+     * @param block The suspending function that will be run inside of a transaction.
+     * Coroutine builder functions like `async` and `launch` can be used inside of the block.
+     */
+    suspend fun <R> withNonExclusiveTransaction(block: suspend () -> R): R = withTransaction(
+        beginStatement = SupportSQLiteDatabase::beginTransactionWithListenerNonExclusive,
+        block
+    )
+
+    private suspend fun <R> withTransaction(
+        beginStatement: SupportSQLiteDatabase.(SQLiteTransactionListener?) -> Unit,
         block: suspend () -> R
     ): R {
         // Use inherited transaction context if available, this allows nested suspending transactions.
@@ -633,46 +656,37 @@ class KiteDatabase internal constructor(
             val transactionElement = coroutineContext[TransactionElement]!!
             transactionElement.acquire()
             try {
-                if (logging) log("TXN BEGIN %s", transaction)
-                writableDatabase.beginTransaction()
+                //newTransaction()
+                val transaction = suspendingTransactions.get()
+                Log.d("TXN", "beginTransaction suspendingTransactions gets: $transaction")
+                suspendingTransactions.set(transaction)
+                if (logging) log("TXN BEGIN %s", transactionContext)
+                writableDatabase.beginStatement(transaction)
                 try {
                     val result = block.invoke()
+                    //markSuccessful()
                     writableDatabase.setTransactionSuccessful()
                     return@withContext result
                 } finally {
-                    writableDatabase.endTransaction()
+                    //end()
+                    Log.d("TXN", "finally suspendingTransactions: ${suspendingTransactions.get()}")
+                    val transaction: SqliteTransaction = suspendingTransactions.get() ?: throw IllegalStateException("Not in transaction.")
+                    val newTransaction = transaction.parent
+                    withContext(suspendingTransactions.asContextElement(newTransaction)) {
+                        Log.d("TXN", "suspendingTransactions gets new value: $newTransaction")
+                        if (logging) log("TXN END %s", transactionContext)
+                        writableDatabase.endTransaction()
+                        // Send the triggers after ending the transaction in the DB if the transaction was successful.
+                        if (transaction.commit) {
+                            sendTableTrigger(transaction)
+                        }
+                    }
                 }
             } finally {
                 transactionElement.release()
             }
         }
     }
-
-    suspend fun <R> withNonExclusiveTransaction(
-        block: suspend () -> R
-    ): R {
-        // Use inherited transaction context if available, this allows nested suspending transactions.
-        val transactionContext =
-            coroutineContext[TransactionElement]?.transactionDispatcher ?: createTransactionContext()
-        return withContext(transactionContext) {
-            val transactionElement = coroutineContext[TransactionElement]!!
-            transactionElement.acquire()
-            try {
-                if (logging) log("TXN BEGIN %s", transaction)
-                writableDatabase.beginTransactionNonExclusive()
-                try {
-                    val result = block.invoke()
-                    writableDatabase.setTransactionSuccessful()
-                    return@withContext result
-                } finally {
-                    writableDatabase.endTransaction()
-                }
-            } finally {
-                transactionElement.release()
-            }
-        }
-    }
-
 
     /** An in-progress database transaction.  */
     interface Transaction : Closeable {

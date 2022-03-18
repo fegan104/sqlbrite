@@ -973,18 +973,12 @@ class KiteDatabaseTest {
                 .hasRow("bob", "Bob Bobberson")
                 .hasRow("eve", "Eve Evenson")
                 .isExhausted()
+
             db.withTransaction {
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("john", "John Johnson"))
                 db.insert(TestDb.TABLE_EMPLOYEE, SQLiteDatabase.CONFLICT_NONE, TestDb.employee("nick", "Nick Nickers"))
             }
-            awaitItemAndRunQuery()
-                .hasRow("alice", "Alice Allison")
-                .hasRow("bob", "Bob Bobberson")
-                .hasRow("eve", "Eve Evenson")
-                .hasRow("john", "John Johnson")
-                .hasRow("nick", "Nick Nickers")
-                .isExhausted()
-            //TODO we should probably only do one emission per transaction
+
             awaitItemAndRunQuery()
                 .hasRow("alice", "Alice Allison")
                 .hasRow("bob", "Bob Bobberson")
