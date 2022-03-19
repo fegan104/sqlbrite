@@ -122,6 +122,9 @@ class KiteDatabase internal constructor(
     val writableDatabase: SupportSQLiteDatabase
         get() = helper.writableDatabase
 
+    /**
+     * A manual method for re-emitting queries on the given tables.
+     */
     fun sendTableTrigger(tables: Set<String>) {
         val suspendingTransaction = suspendingTransactions.get()
         if (suspendingTransaction != null) {
@@ -261,9 +264,6 @@ class KiteDatabase internal constructor(
      * special single threaded transaction dispatcher if we are in a transaction.
      */
     private suspend fun <R> withQueryOrTransactionContext(block: suspend () -> R): R {
-        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransactions.get() != null) {
-            return block()
-        }
         // Use the transaction dispatcher if we are on a transaction coroutine, otherwise
         // use the database dispatchers.
         val context = coroutineContext[TransactionElement]?.transactionDispatcher
@@ -627,7 +627,7 @@ class KiteDatabase internal constructor(
     @kotlin.annotation.Retention(AnnotationRetention.SOURCE)
     private annotation class ConflictAlgorithm
 
-    fun log(message: String, vararg args: Any?) {
+    private fun log(message: String, vararg args: Any?) {
         logger.log(
             if (args.isNotEmpty()) message.format(*args) else message
         )
