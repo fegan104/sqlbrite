@@ -1,6 +1,13 @@
 Change Log
 ==========
 
+Version 4.1.0 *(2022-03-20)*
+----------------------------
+
+ * New breaking change api for content resolver extensions.
+ * Fixed suspending transaction mechanism.
+
+
 Version 4.0.7 *(2022-03-14)*
 ----------------------------
 
