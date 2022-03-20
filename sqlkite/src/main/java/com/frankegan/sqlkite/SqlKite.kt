@@ -15,7 +15,6 @@
  */
 package com.frankegan.sqlkite
 
-import android.content.ContentResolver
 import android.database.Cursor
 import android.util.Log
 import androidx.annotation.CheckResult
@@ -80,20 +79,6 @@ class SqlKite internal constructor(
         } else {
             KiteDatabase(helper, logger, dispatcher, transactionExecutor, queryTransformer)
         }
-    }
-
-    /**
-     * Wrap a [ContentResolver] for observable queries.
-     *
-     * @param dispatcher The [CoroutineDispatcher] on which items from
-     * [KiteContentResolver.createQuery] will be emitted.
-     */
-    @CheckResult
-    fun wrapContentProvider(
-        contentResolver: ContentResolver,
-        dispatcher: CoroutineDispatcher
-    ): KiteContentResolver {
-        return KiteContentResolver(contentResolver, logger, dispatcher, queryTransformer)
     }
 
     /** An executable query.  */

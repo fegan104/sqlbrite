@@ -26,21 +26,11 @@ import androidx.sqlite.db.*
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.asContextElement
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.withContext
 import java.io.Closeable
-import java.util.LinkedHashSet
-import java.util.concurrent.Executor
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
-import java.util.concurrent.ThreadFactory
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.coroutineContext
@@ -57,50 +47,23 @@ class KiteDatabase internal constructor(
     private val queryTransformer: (Flow<SqlKite.Query>) -> Flow<SqlKite.Query>
 ) : Closeable {
 
-    // Package-private to avoid synthetic accessor method for 'transaction' instance.
-    val transactions = ThreadLocal<SqliteTransaction?>()
-    private val suspendingTransactionId = ThreadLocal<Int>()
+    private val suspendingTransactions = ThreadLocal<SqliteTransaction?>()
 
     private val triggers = MutableSharedFlow<Set<String>>(extraBufferCapacity = 1)
 
-    private val transaction: Transaction = object : Transaction {
-        override fun markSuccessful() {
-            if (logging) log("TXN SUCCESS %s", transactions.get())
-            writableDatabase.setTransactionSuccessful()
-        }
-
-        override fun yieldIfContendedSafely(): Boolean {
-            return writableDatabase.yieldIfContendedSafely()
-        }
-
-        override fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean {
-            return writableDatabase.yieldIfContendedSafely(sleepUnit.toMillis(sleepAmount))
-        }
-
-        override fun end() {
-            val transaction: SqliteTransaction = transactions.get() ?: throw IllegalStateException("Not in transaction.")
-            val newTransaction = transaction.parent
-            transactions.set(newTransaction)
-            if (logging) log("TXN END %s", transaction)
-            writableDatabase.endTransaction()
-            // Send the triggers after ending the transaction in the DB.
-            if (transaction.commit) {
-                sendTableTrigger(transaction)
-            }
-        }
-
-        override fun close() {
-            end()
-        }
-    }
+    /**
+     * True if the underlying database is in a transaction
+     * or if we are still in a transaction for suspending functions.
+     */
+    val inSuspendingTransaction: Boolean
+        get() = suspendingTransactions.get() != null || readableDatabase.inTransaction()
 
     private val ensureNotInTransaction = {
-        check(suspendingTransactionId.get() == null && transactions.get() == null) { "Cannot subscribe to observable query in a transaction." }
+        check(!inSuspendingTransaction) { "Cannot subscribe to observable query in a transaction." }
     }
 
-    // Package-private to avoid synthetic accessor method for 'transaction' instance.
     @Volatile
-    var logging = false
+    private var logging = false
 
     /**
      * Control whether debug logging is enabled.
@@ -159,62 +122,17 @@ class KiteDatabase internal constructor(
     val writableDatabase: SupportSQLiteDatabase
         get() = helper.writableDatabase
 
+    /**
+     * A manual method for re-emitting queries on the given tables.
+     */
     fun sendTableTrigger(tables: Set<String>) {
-        val transaction = transactions.get()
-        if (transaction != null) {
-            transaction.addAll(tables)
+        val suspendingTransaction = suspendingTransactions.get()
+        if (suspendingTransaction != null) {
+            suspendingTransaction.addAll(tables)
         } else {
             if (logging) log("TRIGGER %s", tables)
             triggers.tryEmit(tables)
         }
-    }
-
-    /**
-     * Begin a transaction for this thread.
-     *
-     *
-     * Transactions may nest. If the transaction is not in progress, then a database connection is
-     * obtained and a new transaction is started. Otherwise, a nested transaction is started.
-     *
-     *
-     * Each call to `newTransaction` must be matched exactly by a call to
-     * [Transaction.end]. To mark a transaction as successful, call
-     * [Transaction.markSuccessful] before calling [Transaction.end]. If the
-     * transaction is not successful, or if any of its nested transactions were not successful, then
-     * the entire transaction will be rolled back when the outermost transaction is ended.
-     *
-     *
-     * Transactions queue up all query notifications until they have been applied.
-     *
-     *
-     * Here is the standard idiom for transactions:
-     *
-     * <pre>`try (Transaction transaction = db.newTransaction()) {
-     * ...
-     * transaction.markSuccessful();
-     * }
-    `</pre> *
-     *
-     * Manually call [Transaction.end] when try-with-resources is not available:
-     * <pre>`Transaction transaction = db.newTransaction();
-     * try {
-     * ...
-     * transaction.markSuccessful();
-     * } finally {
-     * transaction.end();
-     * }
-    `</pre> *
-     *
-     *
-     * @see SupportSQLiteDatabase.beginTransaction
-     */
-    @CheckResult
-    fun newTransaction(): Transaction {
-        val transaction = SqliteTransaction(transactions.get())
-        transactions.set(transaction)
-        if (logging) log("TXN BEGIN %s", transaction)
-        writableDatabase.beginTransactionWithListener(transaction)
-        return this.transaction
     }
 
     /**
@@ -326,7 +244,7 @@ class KiteDatabase internal constructor(
 
     @CheckResult
     private fun createQuery(query: DatabaseQuery): Flow<SqlKite.Query> {
-        check(suspendingTransactionId.get() == null && transactions.get() == null) {
+        check(!inSuspendingTransaction) {
             """
             Cannot create observable query in transaction. 
             Use query() for a query inside a transaction.
@@ -341,10 +259,11 @@ class KiteDatabase internal constructor(
             .let(queryTransformer) // Apply the user's query transformer.
     }
 
+    /**
+     * Runs the given block either on the dispatcher provided through the constructor or the
+     * special single threaded transaction dispatcher if we are in a transaction.
+     */
     private suspend fun <R> withQueryOrTransactionContext(block: suspend () -> R): R {
-        if (writableDatabase.isOpen && writableDatabase.inTransaction() && suspendingTransactionId.get() != null) {
-            return block()
-        }
         // Use the transaction dispatcher if we are on a transaction coroutine, otherwise
         // use the database dispatchers.
         val context = coroutineContext[TransactionElement]?.transactionDispatcher
@@ -360,7 +279,6 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.query
      */
     @CheckResult
-    @WorkerThread
     suspend fun query(sql: String, vararg args: Any): Cursor {
         val cursor: Cursor = withQueryOrTransactionContext {
             readableDatabase.query(sql, args)
@@ -377,7 +295,6 @@ class KiteDatabase internal constructor(
      * @see SupportSQLiteDatabase.query
      */
     @CheckResult
-    @WorkerThread
     suspend fun query(query: SupportSQLiteQuery): Cursor = withContext(queryDispatcher) {
         val cursor: Cursor = withQueryOrTransactionContext {
             readableDatabase.query(query)
@@ -392,7 +309,6 @@ class KiteDatabase internal constructor(
      * Insert a row into the specified `table` and notify any subscribed queries.
      * @see SupportSQLiteDatabase.insert
      */
-    @WorkerThread
     suspend fun insert(
         table: String,
         @ConflictAlgorithm conflictAlgorithm: Int,
@@ -422,7 +338,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.delete
      */
-    @WorkerThread
     suspend fun delete(
         table: String,
         whereClause: String?,
@@ -452,7 +367,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.update
      */
-    @WorkerThread
     suspend fun update(
         table: String, @ConflictAlgorithm conflictAlgorithm: Int,
         values: ContentValues, whereClause: String?, vararg whereArgs: String?
@@ -486,7 +400,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun execute(sql: String) = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n  sql: %s", indentSql(sql))
         writableDatabase.execSQL(sql)
@@ -502,7 +415,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun execute(sql: String, vararg args: Any?) = withQueryOrTransactionContext {
         if (logging) log("EXECUTE\n  sql: %s\n  args: %s", indentSql(sql), args.contentToString())
         writableDatabase.execSQL(sql, args)
@@ -518,7 +430,6 @@ class KiteDatabase internal constructor(
      *
      * @see SupportSQLiteDatabase.execSQL
      */
-    @WorkerThread
     suspend fun executeAndTrigger(table: String, sql: String?) = withQueryOrTransactionContext {
         executeAndTrigger(setOf(table), sql!!)
     }
@@ -528,7 +439,6 @@ class KiteDatabase internal constructor(
      *
      * @see KiteDatabase.executeAndTrigger
      */
-    @WorkerThread
     suspend fun executeAndTrigger(tables: Set<String>, sql: String) = withQueryOrTransactionContext {
         execute(sql)
         sendTableTrigger(tables)
@@ -617,16 +527,6 @@ class KiteDatabase internal constructor(
         rowId
     }
 
-    //TODO triple check this logic
-    fun assertNotSuspendingTransaction() {
-        check(writableDatabase.inTransaction() || suspendingTransactionId.get() == null) {
-            ("""
-                Cannot access database on a different coroutine 
-                context inherited from a suspending transaction.
-                """.trimIndent())
-        }
-    }
-
     private suspend fun createTransactionContext(): CoroutineContext {
         val controlJob = Job()
         // make sure to tie the control job to this context to avoid blocking the transaction if
@@ -638,12 +538,45 @@ class KiteDatabase internal constructor(
         }
         val dispatcher = transactionExecutor.acquireTransactionThread(controlJob)
         val transactionElement = TransactionElement(controlJob, dispatcher)
+        val suspendingTransaction = suspendingTransactions.get()
         val threadLocalElement =
-            suspendingTransactionId.asContextElement(controlJob.hashCode())
+            suspendingTransactions.asContextElement(suspendingTransaction)
+
         return dispatcher + transactionElement + threadLocalElement
     }
 
-    suspend fun <R> withTransaction(
+    /**
+     * Begins a suspending transaction in exclusive mode. If the
+     * transaction is not successful, or if any of its nested transactions were not successful, then
+     * the entire transaction will be rolled back when the outermost transaction is ended.
+     *
+     * Transactions queue up all query notifications until they have been applied.
+     *
+     * @param block The suspending function that will be run inside of a transaction.
+     * Coroutine builder functions like `async` and `launch` can be used inside of the block.
+     */
+    suspend fun <R> withTransaction(block: suspend () -> R): R = withTransaction(
+        beginStatement = SupportSQLiteDatabase::beginTransactionWithListener,
+        block
+    )
+
+    /**
+     * Begins a suspending transaction in immediate mode. If the
+     * transaction is not successful, or if any of its nested transactions were not successful, then
+     * the entire transaction will be rolled back when the outermost transaction is ended.
+     *
+     * Transactions queue up all query notifications until they have been applied.
+     *
+     * @param block The suspending function that will be run inside of a transaction.
+     * Coroutine builder functions like `async` and `launch` can be used inside of the block.
+     */
+    suspend fun <R> withNonExclusiveTransaction(block: suspend () -> R): R = withTransaction(
+        beginStatement = SupportSQLiteDatabase::beginTransactionWithListenerNonExclusive,
+        block
+    )
+
+    private suspend fun <R> withTransaction(
+        beginStatement: SupportSQLiteDatabase.(SQLiteTransactionListener?) -> Unit,
         block: suspend () -> R
     ): R {
         // Use inherited transaction context if available, this allows nested suspending transactions.
@@ -653,106 +586,34 @@ class KiteDatabase internal constructor(
             val transactionElement = coroutineContext[TransactionElement]!!
             transactionElement.acquire()
             try {
-                if (logging) log("TXN BEGIN %s", transaction)
-                writableDatabase.beginTransaction()
-                try {
-                    val result = block.invoke()
-                    writableDatabase.setTransactionSuccessful()
-                    return@withContext result
-                } finally {
-                    writableDatabase.endTransaction()
+                //newTransaction()
+                val transactionAtStart = SqliteTransaction(suspendingTransactions.get())
+                withContext(suspendingTransactions.asContextElement(transactionAtStart)) startTransaction@{
+                    if (logging) log("TXN BEGIN %s", transactionAtStart)
+                    writableDatabase.beginStatement(transactionAtStart)
+                    try {
+                        val result = block.invoke()
+                        //markSuccessful()
+                        writableDatabase.setTransactionSuccessful()
+                        return@startTransaction result
+                    } finally {
+                        //end()
+                        val transaction: SqliteTransaction = suspendingTransactions.get() ?: throw IllegalStateException("Not in transaction.")
+                        val newTransaction = transaction.parent
+                        withContext(suspendingTransactions.asContextElement(newTransaction)) {
+                            if (logging) log("TXN END %s", transaction)
+                            writableDatabase.endTransaction()
+                            // Send the triggers after ending the transaction in the DB if the transaction was successful.
+                            if (transaction.commit) {
+                                sendTableTrigger(transaction)
+                            }
+                        }
+                    }
                 }
             } finally {
                 transactionElement.release()
             }
         }
-    }
-
-    suspend fun <R> withNonExclusiveTransaction(
-        block: suspend () -> R
-    ): R {
-        // Use inherited transaction context if available, this allows nested suspending transactions.
-        val transactionContext =
-            coroutineContext[TransactionElement]?.transactionDispatcher ?: createTransactionContext()
-        return withContext(transactionContext) {
-            val transactionElement = coroutineContext[TransactionElement]!!
-            transactionElement.acquire()
-            try {
-                if (logging) log("TXN BEGIN %s", transaction)
-                writableDatabase.beginTransactionNonExclusive()
-                try {
-                    val result = block.invoke()
-                    writableDatabase.setTransactionSuccessful()
-                    return@withContext result
-                } finally {
-                    writableDatabase.endTransaction()
-                }
-            } finally {
-                transactionElement.release()
-            }
-        }
-    }
-
-
-    /** An in-progress database transaction.  */
-    interface Transaction : Closeable {
-
-        /**
-         * End a transaction. See [.newTransaction] for notes about how to use this and when
-         * transactions are committed and rolled back.
-         *
-         * @see SupportSQLiteDatabase.endTransaction
-         */
-        @WorkerThread
-        fun end()
-
-        /**
-         * Marks the current transaction as successful. Do not do any more database work between
-         * calling this and calling [.end]. Do as little non-database work as possible in that
-         * situation too. If any errors are encountered between this and [.end] the transaction
-         * will still be committed.
-         *
-         * @see SupportSQLiteDatabase.setTransactionSuccessful
-         */
-        @WorkerThread
-        fun markSuccessful()
-
-        /**
-         * Temporarily end the transaction to let other threads run. The transaction is assumed to be
-         * successful so far. Do not call [.markSuccessful] before calling this. When this
-         * returns a new transaction will have been created but not marked as successful. This assumes
-         * that there are no nested transactions (newTransaction has only been called once) and will
-         * throw an exception if that is not the case.
-         *
-         * @return true if the transaction was yielded
-         *
-         * @see SupportSQLiteDatabase.yieldIfContendedSafely
-         */
-        @WorkerThread
-        fun yieldIfContendedSafely(): Boolean
-
-        /**
-         * Temporarily end the transaction to let other threads run. The transaction is assumed to be
-         * successful so far. Do not call [.markSuccessful] before calling this. When this
-         * returns a new transaction will have been created but not marked as successful. This assumes
-         * that there are no nested transactions (newTransaction has only been called once) and will
-         * throw an exception if that is not the case.
-         *
-         * @param sleepAmount if > 0, sleep this long before starting a new transaction if
-         * the lock was actually yielded. This will allow other background threads to make some
-         * more progress than they would if we started the transaction immediately.
-         * @return true if the transaction was yielded
-         *
-         * @see SupportSQLiteDatabase.yieldIfContendedSafely
-         */
-        @WorkerThread
-        fun yieldIfContendedSafely(sleepAmount: Long, sleepUnit: TimeUnit): Boolean
-
-        /**
-         * Equivalent to calling [.end]
-         */
-        @WorkerThread
-        override fun close()
     }
 
     @IntDef(
@@ -766,13 +627,13 @@ class KiteDatabase internal constructor(
     @kotlin.annotation.Retention(AnnotationRetention.SOURCE)
     private annotation class ConflictAlgorithm
 
-    fun log(message: String, vararg args: Any?) {
+    private fun log(message: String, vararg args: Any?) {
         logger.log(
             if (args.isNotEmpty()) message.format(*args) else message
         )
     }
 
-    class SqliteTransaction(val parent: SqliteTransaction?) : LinkedHashSet<String>(), SQLiteTransactionListener {
+    private class SqliteTransaction(val parent: SqliteTransaction?) : LinkedHashSet<String>(), SQLiteTransactionListener {
 
         var commit = false
         override fun onBegin() {}
@@ -793,7 +654,7 @@ class KiteDatabase internal constructor(
     ) : SqlKite.Query() {
 
         override suspend fun runQuery(): Cursor {
-            check(transactions.get() == null) { "Cannot execute observable query in a transaction." }
+            check(!inSuspendingTransaction) { "Cannot execute observable query in a transaction." }
             val cursor: Cursor = readableDatabase.query(query)
             if (logging) {
                 log("QUERY\n  tables: %s\n  sql: %s", tables, indentSql(query.sql))
