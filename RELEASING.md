@@ -8,4 +8,3 @@ Releasing
  5. `git push && git push --tags`
  6. Generate newly updated documentation with `./gradlew dokkaHtml`.
  7. Deploy new documentation to `fegan104.github.io`.
- 8. Update the `README.md` with the new version from Jitpack.
