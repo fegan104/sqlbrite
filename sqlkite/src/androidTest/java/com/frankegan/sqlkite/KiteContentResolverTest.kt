@@ -21,28 +21,21 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import androidx.test.rule.provider.ProviderTestRule
 import app.cash.turbine.test
-import com.google.common.truth.Truth
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.takeWhile
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestCoroutineDispatcher
 import kotlinx.coroutines.test.runBlockingTest
-import java.util.ArrayList
-import java.util.LinkedHashMap
-import androidx.test.rule.provider.ProviderTestRule
-import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 
 
 class KiteContentResolverTest {
 
-    private val logs: MutableList<String?> = ArrayList()
     private val dispatcher = TestCoroutineDispatcher()
     private val killSwitch = MutableStateFlow(false)
-    private lateinit var db: KiteContentResolver
 
     @get:Rule
     val providerRule: ProviderTestRule = ProviderTestRule
@@ -52,41 +45,12 @@ class KiteContentResolverTest {
     private val contentResolver: ContentResolver
         get() = providerRule.resolver
 
-    @Before
-    fun setUp() {
-        val logger: SqlKite.Logger = SqlKite.Logger {
-            logs.add(it)
-        }
-
-        db = KiteContentResolver(contentResolver, logger, dispatcher) { upstream ->
-            upstream.takeWhile { !killSwitch.value }
-        }
-    }
-
     @Test
-    fun testLoggerEnabled() = runBlocking {
-        db.setLoggingEnabled(true)
-        db.createQuery(TABLE).test {
-            contentResolver.insert(TABLE, values("key1", "value1"))
-            awaitItemAndRunQuery()
-                .hasRow("key1", "value1")
-                .isExhausted()
-        }
-
-        Truth.assertThat(logs).isNotEmpty()
-    }
-
-    @Test
-    fun testLoggerDisabled() {
-        db.setLoggingEnabled(false)
-        contentResolver.insert(TABLE, values("key1", "value1"))
-        Truth.assertThat(logs).isEmpty()
-    }
-
-    @Test
-    fun testCreateQueryObservesInsert() = runBlocking {
-        db.createQuery(TABLE).test {
-            contentResolver.insert(TABLE, values("key1", "val1"))
+    fun testCreateQueryObservesInsert() = runBlockingTest {
+        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
+            awaitItemAndRunQuery().isExhausted()
+            val insertedUri = contentResolver.insert(TABLE, values("key1", "val1"))
+            contentResolver.notifyChange(insertedUri!!, null)
             awaitItemAndRunQuery()
                 .hasRow("key1", "val1")
                 .isExhausted()
@@ -96,12 +60,9 @@ class KiteContentResolverTest {
     @Test
     fun testCreateQueryObservesUpdate() = runBlockingTest {
         contentResolver.insert(TABLE, values("key1", "val1"))
-        db.createQuery(TABLE).test {
+        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().hasRow("key1", "val1").isExhausted()
-        }
-
-        contentResolver.update(TABLE, values("key1", "val2"), null, null)
-        db.createQuery(TABLE).test {
+            contentResolver.update(TABLE, values("key1", "val2"), null, null)
             awaitItemAndRunQuery().hasRow("key1", "val2").isExhausted()
         }
     }
@@ -109,11 +70,9 @@ class KiteContentResolverTest {
     @Test
     fun testCreateQueryObservesDelete() = runBlockingTest {
         contentResolver.insert(TABLE, values("key1", "val1"))
-        db.createQuery(TABLE).test {
+        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().hasRow("key1", "val1").isExhausted()
             contentResolver.delete(TABLE, null, null)
-        }
-        db.createQuery(TABLE).test {
             awaitItemAndRunQuery().isExhausted()
         }
     }
@@ -121,19 +80,17 @@ class KiteContentResolverTest {
     @Test
     fun testUnsubscribeDoesNotTrigger() = runBlockingTest {
         val queryCollector = launch {
-            db.createQuery(TABLE).test {
+            contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
                 awaitItemAndRunQuery().isExhausted()
             }
         }
         queryCollector.cancel()
         contentResolver.insert(TABLE, values("key1", "val1"))
-
-        Truth.assertThat(logs).isEmpty()
     }
 
     @Test
-    fun testQueryNotNotifiedWhenQueryTransformerDisposed() = runBlocking {
-        db.createQuery(TABLE).test {
+    fun testQueryNotNotifiedWhenQueryTransformerDisposed() = runBlockingTest {
+        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().isExhausted()
             killSwitch.emit(true)
             contentResolver.insert(TABLE, values("key1", "val1"))
@@ -150,6 +107,9 @@ class KiteContentResolverTest {
     class TestContentProvider: ContentProvider() {
 
         private val storage: MutableMap<String, String> = LinkedHashMap()
+        
+        private val contentResolver: ContentResolver
+            get() = contentResolver
 
         override fun onCreate(): Boolean = true
 
@@ -160,7 +120,7 @@ class KiteContentResolverTest {
         override fun insert(uri: Uri, values: ContentValues?): Uri? {
             values ?: return null
             storage[values.getAsString(KEY)] = values.getAsString(VALUE)
-            context!!.contentResolver.notifyChange(uri, null)
+            contentResolver.notifyChange(uri, null)
             return Uri.parse(AUTHORITY.toString() + "/" + values.getAsString(KEY))
         }
 
@@ -174,14 +134,14 @@ class KiteContentResolverTest {
             for (key in storage.keys) {
                 storage[key] = values.getAsString(VALUE)
             }
-            context!!.contentResolver.notifyChange(uri, null)
+            contentResolver.notifyChange(uri, null)
             return storage.size
         }
 
         override fun delete(uri: Uri, selection: String?, selectionArgs: Array<String>?): Int {
             val result = storage.size
             storage.clear()
-            context!!.contentResolver.notifyChange(uri, null)
+            contentResolver.notifyChange(uri, null)
             return result
         }
 
