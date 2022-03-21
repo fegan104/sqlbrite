@@ -53,7 +53,7 @@ import java.util.*
  * @see ContentResolver.registerContentObserver
  */
 @CheckResult
-fun ContentResolver.observerQuery(
+fun ContentResolver.observeQuery(
     uri: Uri,
     projection: Array<String>? = null,
     selection: String? = null,
@@ -79,6 +79,8 @@ fun ContentResolver.observerQuery(
         awaitClose {
             unregisterContentObserver(observer)
         }
+    }.onStart {
+        emit(query)
     }
 }
 

@@ -47,7 +47,7 @@ class KiteContentResolverTest {
 
     @Test
     fun testCreateQueryObservesInsert() = runBlockingTest {
-        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
+        contentResolver.observeQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().isExhausted()
             val insertedUri = contentResolver.insert(TABLE, values("key1", "val1"))
             contentResolver.notifyChange(insertedUri!!, null)
@@ -60,7 +60,7 @@ class KiteContentResolverTest {
     @Test
     fun testCreateQueryObservesUpdate() = runBlockingTest {
         contentResolver.insert(TABLE, values("key1", "val1"))
-        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
+        contentResolver.observeQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().hasRow("key1", "val1").isExhausted()
             contentResolver.update(TABLE, values("key1", "val2"), null, null)
             awaitItemAndRunQuery().hasRow("key1", "val2").isExhausted()
@@ -70,7 +70,7 @@ class KiteContentResolverTest {
     @Test
     fun testCreateQueryObservesDelete() = runBlockingTest {
         contentResolver.insert(TABLE, values("key1", "val1"))
-        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
+        contentResolver.observeQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().hasRow("key1", "val1").isExhausted()
             contentResolver.delete(TABLE, null, null)
             awaitItemAndRunQuery().isExhausted()
@@ -80,7 +80,7 @@ class KiteContentResolverTest {
     @Test
     fun testUnsubscribeDoesNotTrigger() = runBlockingTest {
         val queryCollector = launch {
-            contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
+            contentResolver.observeQuery(TABLE).flowOn(dispatcher).test {
                 awaitItemAndRunQuery().isExhausted()
             }
         }
@@ -90,7 +90,7 @@ class KiteContentResolverTest {
 
     @Test
     fun testQueryNotNotifiedWhenQueryTransformerDisposed() = runBlockingTest {
-        contentResolver.observerQuery(TABLE).flowOn(dispatcher).test {
+        contentResolver.observeQuery(TABLE).flowOn(dispatcher).test {
             awaitItemAndRunQuery().isExhausted()
             killSwitch.emit(true)
             contentResolver.insert(TABLE, values("key1", "val1"))
@@ -109,7 +109,7 @@ class KiteContentResolverTest {
         private val storage: MutableMap<String, String> = LinkedHashMap()
         
         private val contentResolver: ContentResolver
-            get() = contentResolver
+            get() = context!!.contentResolver
 
         override fun onCreate(): Boolean = true
 
