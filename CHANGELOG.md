@@ -1,6 +1,13 @@
 Change Log
 ==========
 
+Version 4.2.0 *(2022-03-20)*
+----------------------------
+
+ * Update `observeQuery` fucniton name (breaking change)
+ * Add default emission to observeQuery for content resolver
+
+
 Version 4.1.0 *(2022-03-20)*
 ----------------------------
 
