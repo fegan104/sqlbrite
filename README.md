@@ -1,6 +1,5 @@
 SQL Kite 🪁🍃
 =========
-[![](https://jitpack.io/v/fegan104/sqlkite.svg)](https://jitpack.io/#fegan104/sqlkite)
 
 
 A lightweight Kotlin library that makes working with `SupportSQLiteOpenHelper` & `ContentResolver` a breeze by introducing reactive
@@ -103,12 +102,11 @@ users.debounce(500.milliseconds).collect {
 }
 ```
 
-The `SqlKite` object can also wrap a `ContentResolver` for observing a query on another app's
+The `SqlKite.Query` object can be used as an extension function on `ContentResolver` for observing a query on another app's
 content provider.
 
 ```
-val resolver = sqlKite.wrapContentProvider(contentResolver, Dispatchers.IO)
-val query: Flow<SqlKite.Query> = resolver.createQuery(/*...*/)
+val query: Flow<SqlKite.Query> = contentResolver.observeQuery(/*...*/).flowOn(Dispatcher.IO)
 ```
 
 The full power of Kotlin Flow's operators are available for combining, filtering, and triggering any
@@ -129,6 +127,7 @@ you use for Gson. It's not going to perform database migrations for you.
 
 Download
 --------
+[![](https://jitpack.io/v/fegan104/sqlkite.svg)](https://jitpack.io/#fegan104/sqlkite)
 
 ```groovy
 //Project level build.gradle
@@ -137,7 +136,7 @@ repositories {
 }
 
 //App level build.gradle
-implementation 'com.github.fegan104:sqlkite:4.0.4'
+implementation 'com.github.fegan104:sqlkite:<x.y.z>'
 ```
 
 License
