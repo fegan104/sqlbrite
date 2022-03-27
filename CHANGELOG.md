@@ -1,6 +1,11 @@
 Change Log
 ==========
 
+Version 4.3.0 *(2022-03-26)*
+----------------------------
+
+ * Updated some Flow extension method names.
+
 Version 4.2.0 *(2022-03-20)*
 ----------------------------
 
