@@ -23,6 +23,7 @@ import android.os.Handler
 import android.os.Looper
 import androidx.annotation.CheckResult
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import java.util.*
@@ -52,6 +53,7 @@ import java.util.*
  * @see ContentResolver.query
  * @see ContentResolver.registerContentObserver
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @CheckResult
 fun ContentResolver.observeQuery(
     uri: Uri,
@@ -61,10 +63,8 @@ fun ContentResolver.observeQuery(
     sortOrder: String? = null,
     notifyForDescendants: Boolean = true
 ): Flow<SqlKite.Query> {
-    val query: SqlKite.Query = object : SqlKite.Query() {
-        override suspend fun runQuery(): Cursor? {
-            return query(uri, projection, selection, selectionArgs, sortOrder)
-        }
+    val query: SqlKite.Query = SqlKite.Query {
+        query(uri, projection, selection, selectionArgs, sortOrder)
     }
 
     return callbackFlow {

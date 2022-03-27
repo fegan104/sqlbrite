@@ -82,7 +82,7 @@ class SqlKite internal constructor(
     }
 
     /** An executable query.  */
-    abstract class Query {
+    fun interface Query {
 
         /**
          * Execute the query on the underlying database and return the resulting cursor.
@@ -95,40 +95,7 @@ class SqlKite internal constructor(
          */
         @CheckResult
         @WorkerThread
-        abstract suspend fun runQuery(): Cursor?
-
-        /**
-         * Execute the query on the underlying database and return an Observable of each row mapped to
-         * `T` by `mapper`.
-         *
-         *
-         * Standard usage of this operation is in `flatMap`:
-         * <pre>`flatMap(q -> q.asRows(Item.MAPPER).toList())
-        `</pre> *
-         * However, the above is a more-verbose but identical operation as
-         * [mapToList]. This `asRows` method should be used when you need
-         * to limit or filter the items separate from the actual query.
-         * <pre>`flatMap(q -> q.asRows(Item.MAPPER).take(5).toList())
-         * // or...
-         * flatMap(q -> q.asRows(Item.MAPPER).filter(i -> i.isActive).toList())
-        `</pre> *
-         *
-         *
-         * Note: Limiting results or filtering will almost always be faster in the database as part of
-         * a query and should be preferred, where possible.
-         *
-         *
-         * The resulting observable will be empty if `null` is returned from [.run].
-         */
-        @CheckResult
-        fun <T> asRows(mapper: (Cursor) -> T): Flow<T> {
-            return flow {
-                val cursor = runQuery() ?: return@flow
-                while (cursor.moveToNext()) {
-                    emit(mapper(cursor))
-                }
-            }
-        }
+        suspend fun run(): Cursor?
     }
 
     /** A simple indirection for logging debug messages.  */
@@ -140,6 +107,7 @@ class SqlKite internal constructor(
     companion object {
 
         val DEFAULT_LOGGER: Logger = Logger { message -> Log.d("SqlKite", message) }
-        val DEFAULT_TRANSFORMER: (Flow<Query>) -> Flow<Query> = { queryObservable -> queryObservable }
+
+        val DEFAULT_TRANSFORMER: (Flow<Query>) -> Flow<Query> = { queryFlow -> queryFlow }
     }
 }

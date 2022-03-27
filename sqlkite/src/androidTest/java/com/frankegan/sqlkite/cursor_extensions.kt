@@ -32,5 +32,5 @@ fun Cursor.isExhausted() {
 }
 
 suspend fun <Q: SqlKite.Query> FlowTurbine<Q>.awaitItemAndRunQuery(): Cursor {
-    return awaitItem().runQuery()!!
+    return awaitItem().run()!!
 }

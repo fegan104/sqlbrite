@@ -29,11 +29,7 @@ class QueryFlowTest {
     fun mapToListThrowsFromQueryRun() = runBlockingTest {
         val error = IllegalStateException("test exception")
 
-        val query: SqlKite.Query = object : SqlKite.Query() {
-            override suspend fun runQuery(): Cursor {
-                throw error
-            }
-        }
+        val query: SqlKite.Query = SqlKite.Query { throw error }
         flowOf(query)
             .mapToList { throw AssertionError("Must not be called") }
             .test {
@@ -43,12 +39,10 @@ class QueryFlowTest {
 
     @Test
     fun mapToListThrowsFromMapFunction() = runBlockingTest {
-        val query: SqlKite.Query = object : SqlKite.Query() {
-            override suspend fun runQuery(): Cursor {
-                val cursor = MatrixCursor(arrayOf("col1"))
-                cursor.addRow(arrayOf("value1"))
-                return cursor
-            }
+        val query: SqlKite.Query = SqlKite.Query {
+            val cursor = MatrixCursor(arrayOf("col1"))
+            cursor.addRow(arrayOf("value1"))
+            cursor
         }
         val error = IllegalStateException("test exception")
         flowOf(query)

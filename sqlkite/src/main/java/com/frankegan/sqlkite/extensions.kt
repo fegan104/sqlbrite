@@ -18,12 +18,10 @@
 package com.frankegan.sqlkite
 
 import android.database.Cursor
+import androidx.annotation.CheckResult
 import com.frankegan.sqlkite.SqlKite.Query
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.transform
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicInteger
@@ -48,7 +46,7 @@ inline fun <T> Flow<Query>.mapToOne(noinline mapper: (Cursor) -> T): Flow<T> {
     return transform { query ->
         var item: T? = null
 
-        query.runQuery().use { cursor ->
+        query.run().use { cursor ->
             if (cursor?.moveToNext() == true) {
                 item = mapper(cursor)
                 check(!cursor.moveToNext()) { "Cursor returned more than 1 row" }
@@ -61,6 +59,42 @@ inline fun <T> Flow<Query>.mapToOne(noinline mapper: (Cursor) -> T): Flow<T> {
     }
 }
 
+/**
+ * Execute the query on the underlying database and return an Flow of each row mapped to
+ * `T` by `mapper`.
+ *
+ *
+ * Standard usage of this operation is in `flatMap`:
+ * <pre>`flatMap(q -> q.asRows(Item.MAPPER).toList())
+`</pre> *
+ * However, the above is a more-verbose but identical operation as
+ * [mapToList]. This `asRows` method should be used when you need
+ * to limit or filter the items separate from the actual query.
+ * <pre>`flatMap(q -> q.asRows(Item.MAPPER).take(5).toList())
+ * // or...
+ * flatMap(q -> q.asRows(Item.MAPPER).filter(i -> i.isActive).toList())
+`</pre> *
+ *
+ *
+ * Note: Limiting results or filtering will almost always be faster in the database as part of
+ * a query and should be preferred, where possible.
+ *
+ *
+ * The resulting flow will be empty if `null` is returned from [.run].
+ */
+@OptIn(ExperimentalCoroutinesApi::class)
+@CheckResult
+fun <T : Any> Query.asRows(
+    mapper: (Cursor) -> T
+): Flow<T> {
+    return flow {
+        run()?.use { cursor ->
+            while (cursor.moveToNext()) {
+                emit(mapper(cursor))
+            }
+        }
+    }
+}
 
 /**
  * Transforms an observable of single-row [Query] to an observable of `T` using `mapper`
@@ -78,8 +112,8 @@ inline fun <T> Flow<Query>.mapToOneOrDefault(defaultValue: T, noinline mapper: (
     return transform { query ->
         var item: T? = null
 
-        query.runQuery().use { cursor ->
-            if (cursor?.moveToNext() == true) {
+        query.run()?.use { cursor ->
+            if (cursor.moveToNext()) {
                 item = mapper(cursor)
                 check(!cursor.moveToNext()) { "Cursor returned more than 1 row" }
             }
@@ -104,8 +138,8 @@ inline fun <T> Flow<Query>.mapToList(noinline mapper: Mapper<T>): Flow<List<T>> 
     return transform { query ->
         val items = mutableListOf<T>()
 
-        query.runQuery().use { cursor ->
-            while (cursor?.moveToNext() == true) {
+        query.run()?.use { cursor ->
+            while (cursor.moveToNext()) {
                 items += mapper(cursor)
             }
         }
@@ -114,6 +148,12 @@ inline fun <T> Flow<Query>.mapToList(noinline mapper: Mapper<T>): Flow<List<T>> 
     }
 }
 
+/**
+ * A [CoroutineContext.Element] that indicates there is an on-going database transaction.
+ *
+ * Inspired by the [Room AndroidX](https://android.googlesource.com/platform/frameworks/support/+/refs/heads/androidx-main/room/room-ktx/src/main/java/androidx/room/CoroutinesRoom.kt)
+ * Coroutine extension.
+ */
 internal class TransactionElement(
     private val transactionThreadControlJob: Job,
     internal val transactionDispatcher: ContinuationInterceptor
@@ -141,7 +181,8 @@ internal class TransactionElement(
         val count = referenceCount.decrementAndGet()
         if (count < 0) {
             throw IllegalStateException(
-                "Transaction was never started or was already released.")
+                "Transaction was never started or was already released."
+            )
         } else if (count == 0) {
             // Cancel the job that controls the transaction thread, causing it
             // to be released.
@@ -149,8 +190,6 @@ internal class TransactionElement(
         }
     }
 }
-
-
 
 /**
  * Prepares and returns a [ContinuationInterceptor] to dispatch coroutines to
@@ -186,7 +225,8 @@ internal suspend fun Executor.acquireTransactionThread(
         // Couldn't acquire a thread, cancel coroutine.
         continuation.cancel(
             IllegalStateException(
-                "Unable to acquire a thread to perform the transaction.", ex)
+                "Unable to acquire a thread to perform the transaction.", ex
+            )
         )
     }
 }

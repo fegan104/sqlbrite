@@ -21,6 +21,7 @@ import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.provider.ProviderTestRule
 import app.cash.turbine.test
 import kotlinx.coroutines.flow.MutableStateFlow

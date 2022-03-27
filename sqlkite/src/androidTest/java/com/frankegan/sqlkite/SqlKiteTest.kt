@@ -74,9 +74,9 @@ class SqlKiteTest {
         }
     }
 
-    internal class CursorQuery(private val cursor: Cursor) : SqlKite.Query() {
+    internal class CursorQuery(private val cursor: Cursor) : SqlKite.Query {
 
-        override suspend fun runQuery(): Cursor {
+        override suspend fun run(): Cursor {
             return cursor
         }
     }

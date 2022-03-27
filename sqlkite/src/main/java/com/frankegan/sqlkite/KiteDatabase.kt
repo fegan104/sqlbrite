@@ -651,9 +651,9 @@ class KiteDatabase internal constructor(
     internal inner class DatabaseQuery(
         private val tables: Iterable<String>,
         private val query: SupportSQLiteQuery
-    ) : SqlKite.Query() {
+    ) : SqlKite.Query {
 
-        override suspend fun runQuery(): Cursor {
+        override suspend fun run(): Cursor {
             check(!inSuspendingTransaction) { "Cannot execute observable query in a transaction." }
             val cursor: Cursor = readableDatabase.query(query)
             if (logging) {

@@ -15,7 +15,6 @@
  */
 package com.frankegan.sqlkite
 
-import android.annotation.SuppressLint
 import android.annotation.TargetApi
 import android.content.ContentValues
 import android.database.SQLException
@@ -209,7 +208,7 @@ class KiteDatabaseTest {
     @Test
     fun badQueryCallsError() = runBlockingTest {
         db.createQuery(TestDb.TABLE_EMPLOYEE, "SELECT * FROM missing")
-            .map { query -> query.runQuery() }
+            .map { query -> query.run() }
             .test {
                 Truth.assertThat(awaitError()).hasMessageThat().contains("no such table: missing")
             }
