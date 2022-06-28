@@ -29,8 +29,6 @@ import kotlin.coroutines.ContinuationInterceptor
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resume
 
-typealias Mapper<T> = (Cursor) -> T
-
 /**
  * Transforms an observable of single-row [Query] to an observable of `T` using `mapper`.
  *
@@ -134,7 +132,7 @@ inline fun <T> Flow<Query>.mapToOneOrDefault(defaultValue: T, noinline mapper: (
  *
  * @param mapper Maps the current [Cursor] row to `T`. May not return null.
  */
-inline fun <T> Flow<Query>.mapToList(noinline mapper: Mapper<T>): Flow<List<T>> {
+inline fun <T> Flow<Query>.mapToList(noinline mapper: (Cursor) -> T): Flow<List<T>> {
     return transform { query ->
         val items = mutableListOf<T>()
 
