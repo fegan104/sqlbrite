@@ -123,6 +123,13 @@ class KiteDatabase internal constructor(
         get() = helper.writableDatabase
 
     /**
+     * A manual method for re-emitting queries on a given table.
+     */
+    fun sendTableTrigger(table: String) {
+        sendTableTrigger(setOf(table))
+    }
+
+    /**
      * A manual method for re-emitting queries on the given tables.
      */
     fun sendTableTrigger(tables: Set<String>) {
