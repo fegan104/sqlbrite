@@ -7,4 +7,4 @@ Releasing
  4. `git tag -a X.Y.Z -m "Version X.Y.Z"` (where X.Y.Z is the new version)
  5. `git push && git push --tags`
  6. Generate newly updated documentation with `./gradlew dokkaHtml`.
- 7. Deploy new documentation to `fegan104.github.io`.
+ 7. Deploy new documentation to Github pages by pushing new contents of `/docs` to main.
