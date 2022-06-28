@@ -1,6 +1,14 @@
 Change Log
 ==========
 
+
+Version 4.3.1 *(2022-06-27)*
+----------------------------
+
+ * Updated to add a new convenience method fo table triggers.
+ * Removed unecessary Mapper `typealias`.
+ 
+
 Version 4.3.0 *(2022-03-26)*
 ----------------------------
 
