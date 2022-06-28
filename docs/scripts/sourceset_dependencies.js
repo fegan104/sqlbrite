@@ -1,0 +1,1 @@
+sourceset_dependencies='{":sqlkite:dokkaHtml/androidTestRelease":[],":sqlkite:dokkaHtml/debug":[],":sqlkite:dokkaHtml/main":[],":sqlkite:dokkaHtml/release":[],":sqlkite:dokkaHtml/testFixtures":[],":sqlkite:dokkaHtml/testFixturesDebug":[],":sqlkite:dokkaHtml/testFixturesRelease":[]}'
