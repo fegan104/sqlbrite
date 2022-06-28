@@ -54,6 +54,10 @@ android {
     }
 }
 
+tasks.named("dokkaHtml") {
+    outputDirectory.set(new File(rootDir.path + "/docs/"))
+}
+
 afterEvaluate {
     publishing {
         publications {
