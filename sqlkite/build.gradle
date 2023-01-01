@@ -2,6 +2,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
 apply plugin: 'org.jetbrains.dokka'
 apply plugin: 'maven-publish'
+apply plugin: 'signing'
 
 dependencies {
     api rootProject.ext.kotlinStdLib
@@ -36,6 +37,7 @@ android {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
+
     packagingOptions {
         resources {
             excludes += ['META-INF/AL2.0', 'META-INF/ASL2.0', 'META-INF/LGPL2.1']
@@ -62,10 +64,53 @@ afterEvaluate {
     publishing {
         publications {
             release(MavenPublication) {
-                from components.release
-                groupId = "com.github.fegan104"
+                groupId = "com.frankegan"
                 artifactId = "sqlkite"
                 version = VERSION_NAME
+                from components.release
+
+                pom {
+                    name = "SQL Kite"
+                    description = "A lightweight Kotlin library that makes working with SupportSQLiteOpenHelper & ContentResolver a breeze by introducing reactive Flow based queries."
+                    url = "https://github.com/fegan104/sqlkite"
+                    inceptionYear = "2021"
+
+                    signing {
+                        sign publishing.publications.release
+                    }
+
+                    licenses {
+                        license {
+                            name = "Apache-2.0"
+                            url = "https://www.apache.org/licenses/LICENSE-2.0.txt"
+                        }
+                    }
+
+                    developers {
+                        developer {
+                            id = "frankegan"
+                            name = "Frank Egan"
+                            email = "fegan104@gmail.com"
+                        }
+                    }
+
+                    scm {
+                        connection = 'scm:git:git:github.com/fegan104/sqlkite.git'
+                        developerConnection = 'scm:git:ssh://github.com/fegan104/sqlkite.git'
+                        url = 'https://github.com/fegan104/sqlkite'
+                    }
+                }
+            }
+        }
+
+        repositories {
+            maven {
+                name = "OSSRH"
+                url = "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2/"
+                credentials {
+                    username = project.properties["ossrhUsername"]
+                    password = project.properties["ossrhPassword"]
+                }
             }
         }
     }
