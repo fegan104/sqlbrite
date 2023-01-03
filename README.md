@@ -127,16 +127,16 @@ you use for Gson. It's not going to perform database migrations for you.
 
 Download
 --------
-[![](https://jitpack.io/v/fegan104/sqlkite.svg)](https://jitpack.io/#fegan104/sqlkite)
+[![Maven Central](https://maven-badges.herokuapp.com/maven-central/com.frankegan/sqlkite/badge.svg)](https://maven-badges.herokuapp.com/maven-central/com.frankegan/sqlkite)
 
 ```groovy
 //Project level build.gradle
 repositories {
-    maven { url 'https://jitpack.io' }
+    mavenCentral()
 }
 
 //App level build.gradle
-implementation 'com.github.fegan104:sqlkite:<x.y.z>'
+implementation 'com.frankegan:sqlkite:<x.y.z>'
 ```
 
 License
