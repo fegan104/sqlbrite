@@ -27,8 +27,8 @@ jobs:
       - id: install-secret-key
         name: Install GPG secret key
         run: |
-          cat <(echo -e "${{ secrets.GPG_PRIVATE_KEY }}") | gpg --batch --import --no-tty --pinentry-mode loopback
-          gpg --export-secret-keys --no-tty --pinentry-mode loopback > ~/.gnupg/secring.gpg
+          cat <(echo -e "${{ secrets.GPG_PRIVATE_KEY }}") | gpg --pinentry-mode=loopback --batch --import
+          gpg --export-secret-keys --pinentry-mode=loopback --passphrase ${{secrets.GPG_PASSPHRASE}} > ~/.gnupg/secring.gpg
 
       - id: set-secret-key-path-var
         name: Set the secret key path env var
@@ -40,8 +40,8 @@ jobs:
         with:
           arguments: |
             publish
-            -Psigning.keyId=${{secrets.OSSRH_GPG_SECRET_KEY_ID}}
-            -Psigning.password='${{secrets.OSSRH_GPG_SECRET_KEY_PASSWORD}}'
+            -Psigning.keyId=${{secrets.GPG_PRIVATE_KEY}}
+            -Psigning.password='${{secrets.GPG_PASSPHRASE}}'
             -Psigning.secretKeyRingFile=${{env.SECRET_KEY_RING_PATH}} --warn --stacktrace
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
