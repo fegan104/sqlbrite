@@ -27,15 +27,17 @@ jobs:
       - id: install-secret-key
         name: Install GPG secret key
         run: |
-          cat <(echo -e "${{ secrets.GPG_PRIVATE_KEY }}") | gpg --batch --import
+          mkdir -p ~/.gradle/
+          echo "${{secrets.GPG_PRIVATE_KEY}}" > ~/.gradle/secring.gpg
 
       - name: Publish package
         uses: gradle/gradle-build-action@67421db6bd0bf253fb4bd25b31ebb98943c375e1
         with:
           arguments: |
             publish
-            -Psigning.gnupg.keyName=${{secrets.OSSRH_GPG_SECRET_KEY_ID}}
-            -Psigning.gnupg.passphrase='${{secrets.OSSRH_GPG_SECRET_KEY_PASSWORD}}' --warn --stacktrace
+            -Psigning.keyId=${{secrets.OSSRH_GPG_SECRET_KEY_ID}}
+            -Psigning.password='${{secrets.OSSRH_GPG_SECRET_KEY_PASSWORD}}'
+            -Psigning.secretKeyRingFile=$(echo ~/.gradle/secring.gpg) --warn --stacktrace
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
