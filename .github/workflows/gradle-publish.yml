@@ -34,8 +34,8 @@ jobs:
         with:
           arguments: |
             publish
-            -Psigning.keyId=${{secrets.OSSRH_GPG_SECRET_KEY_ID}}
-            -Psigning.password='${{secrets.OSSRH_GPG_SECRET_KEY_PASSWORD}}' --warn --stacktrace
+            -Psigning.gnupg.keyName=${{secrets.OSSRH_GPG_SECRET_KEY_ID}}
+            -Psigning.gnupg.passphrase='${{secrets.OSSRH_GPG_SECRET_KEY_PASSWORD}}' --warn --stacktrace
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
