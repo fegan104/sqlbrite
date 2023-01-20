@@ -28,7 +28,7 @@ jobs:
         name: Install GPG secret key
         run: |
           cat <(echo -e "${{ secrets.GPG_PRIVATE_KEY }}") | gpg --pinentry-mode=loopback --batch --import
-          gpg --keyring secring.gpg --export-secret-keys > ~/.gnupg/secring.gpg
+          gpg --keyring secring.gpg --pinentry-mode=loopback --export-secret-keys > ~/.gnupg/secring.gpg
 
       - id: set-secret-key-path-var
         name: Set the secret key path env var
