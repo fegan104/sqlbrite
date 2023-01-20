@@ -45,4 +45,4 @@ jobs:
             -Psigning.secretKeyRingFile=${{env.SECRET_KEY_RING_PATH}} --warn --stacktrace
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
-          MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
+          MAVEN_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
