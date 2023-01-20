@@ -27,14 +27,13 @@ jobs:
       - id: install-secret-key
         name: Install GPG secret key
         run: |
-          mkdir -p ~/.gradle/
-          echo "${{secrets.GPG_PRIVATE_KEY}}" > ~/.gradle/secring.gpg.b64
-          base64 -d ~/.gradle/secring.gpg.b64 > ~/.gradle/secring.gpg
+          cat <(echo -e "${{ secrets.GPG_PRIVATE_KEY }}") | gpg --pinentry-mode=loopback --batch --import
+          gpg --export-secret-keys --pinentry-mode=loopback --passphrase ${{secrets.GPG_PASSPHRASE}} > ~/.gnupg/secring.gpg
 
       - id: set-secret-key-path-var
         name: Set the secret key path env var
         run: |
-          echo "SECRET_KEY_RING_PATH=$(echo ~/.gradle/secring.gpg)" >> $GITHUB_ENV
+          echo "SECRET_KEY_RING_PATH=$(echo ~/.gnupg/secring.gpg)" >> $GITHUB_ENV
 
       - name: Publish package
         uses: gradle/gradle-build-action@67421db6bd0bf253fb4bd25b31ebb98943c375e1
