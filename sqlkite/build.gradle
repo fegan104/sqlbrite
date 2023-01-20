@@ -76,6 +76,7 @@ afterEvaluate {
                     inceptionYear = "2021"
 
                     signing {
+                        useGpgCmd()
                         sign publishing.publications.release
                     }
 
