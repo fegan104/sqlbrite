@@ -9,7 +9,7 @@
 
 name: Publish to Maven Central Repository
 on:
-  pull-request:
+  pull_request:
     branches: [main]
 jobs:
   publish:
