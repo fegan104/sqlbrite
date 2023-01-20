@@ -2,6 +2,13 @@ Change Log
 ==========
 
 
+Version 4.3.2 *(2023-01-19)*
+----------------------------
+
+ * Updated build to publish on Maven Central
+ * Commented out failing `ContentResolver` tests until a new Android X library can be found to work as the previous one
+ 
+
 Version 4.3.1 *(2022-06-27)*
 ----------------------------
 

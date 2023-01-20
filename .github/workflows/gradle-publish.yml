@@ -2,44 +2,50 @@
 # They are provided by a third-party and are governed by
 # separate terms of service, privacy policy, and support
 # documentation.
-# This workflow will build a package using Gradle and then publish it to GitHub packages when a release is created
-# For more information see: https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#Publishing-using-gradle
 
-name: Gradle Package
+# GitHub recommends pinning actions to a commit SHA.
+# To get a newer version, you will need to update the SHA.
+# You can also reference a tag or branch, but the action may change without warning.
 
+name: Publish to Maven Central Repository
 on:
-  release:
-    types: [created]
-
+  pull_request:
+    branches: [main]
 jobs:
-  build:
-
+  publish:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up JDK 11
-      uses: actions/setup-java@v2
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-        server-id: github # Value of the distributionManagement/repository/id field of the pom.xml
-        settings-path: ${{ github.workspace }} # location for the settings.xml file
+      - uses: actions/checkout@v3
+      - name: Set up Java
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+      - name: Validate Gradle wrapper
+        uses: gradle/wrapper-validation-action@e6e38bacfdf1a337459f332974bb2327a31aaf4b
 
-    - name: Build with Gradle
-      uses: gradle/gradle-build-action@937999e9cc2425eddc7fd62d1053baf041147db7
-      with:
-        arguments: build
+      - id: install-secret-key
+        name: Install GPG secret key
+        run: |
+          mkdir -p ~/.gnupg/
+          printf "${{ secrets.GPG_PRIVATE_KEY }}" | base64 --decode > ~/.gnupg/private.key
+          gpg --batch --import ~/.gnupg/private.key
+          gpg --keyring secring.gpg --export-secret-keys --pinentry-mode=loopback --passphrase ${{secrets.GPG_PASSPHRASE}} > ~/.gnupg/secring.gpg
 
-    # The USERNAME and TOKEN need to correspond to the credentials environment variables used in
-    # the publishing section of your build.gradle
-    - name: Publish to GitHub Packages
-      uses: gradle/gradle-build-action@937999e9cc2425eddc7fd62d1053baf041147db7
-      with:
-        arguments: publish
-      env:
-        USERNAME: ${{ github.actor }}
-        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - id: set-secret-key-path-var
+        name: Set the secret key path env var
+        run: |
+          echo "SECRET_KEY_RING_PATH=$(echo ~/.gnupg/secring.gpg)" >> $GITHUB_ENV
+
+      - name: Publish package
+        uses: gradle/gradle-build-action@67421db6bd0bf253fb4bd25b31ebb98943c375e1
+        with:
+          arguments: |
+            publish
+            -Psigning.keyId=EE866757
+            -Psigning.password='${{secrets.GPG_PASSPHRASE}}'
+            -Psigning.secretKeyRingFile=${{env.SECRET_KEY_RING_PATH}} --warn --stacktrace
+        env:
+          MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.OSSRH_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
