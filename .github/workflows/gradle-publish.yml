@@ -30,6 +30,11 @@ jobs:
           mkdir -p ~/.gradle/
           echo "${{secrets.GPG_PRIVATE_KEY}}" > ~/.gradle/secring.gpg
 
+      - id: set-secret-key-path-var
+        name: Set the secret key path env var
+        run: |
+          echo "SECRET_KEY_RING_PATH=$(echo ~/.gradle/secring.gpg)" >> $GITHUB_ENV
+
       - name: Publish package
         uses: gradle/gradle-build-action@67421db6bd0bf253fb4bd25b31ebb98943c375e1
         with:
@@ -37,7 +42,7 @@ jobs:
             publish
             -Psigning.keyId=${{secrets.OSSRH_GPG_SECRET_KEY_ID}}
             -Psigning.password='${{secrets.OSSRH_GPG_SECRET_KEY_PASSWORD}}'
-            -Psigning.secretKeyRingFile=~/.gradle/secring.gpg --warn --stacktrace
+            -Psigning.secretKeyRingFile=${{env.SECRET_KEY_RING_PATH}} --warn --stacktrace
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
           MAVEN_PASSWORD: ${{ secrets.OSSRH_TOKEN }}
