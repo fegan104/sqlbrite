@@ -42,6 +42,7 @@ jobs:
             publish
             -Psigning.keyId='${{secrets.GPG_PRIVATE_KEY}}'
             -Psigning.gnupg.keyName=EE866757
+            -Psigning.gnupg.passphrase='${{secrets.GPG_PASSPHRASE}}'
             -Psigning.password='${{secrets.GPG_PASSPHRASE}}'
             -Psigning.secretKeyRingFile=${{env.SECRET_KEY_RING_PATH}} --warn --stacktrace
         env:
