@@ -9,8 +9,8 @@
 
 name: Publish to Maven Central Repository
 on:
-  release:
-    types: [ created ]
+  push:
+    branches: [main]
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -35,7 +35,7 @@ jobs:
           arguments: |
             publish
             -Psigning.gnupg.keyName=EE866757
-            -Psigning.passphrase='${{secrets.GPG_PASSPHRASE}}'
+            -Psigning.gnupg.passphrase='${{secrets.GPG_PASSPHRASE}}'
             -Psigning.gnupg.executable=gpg --warn --stacktrace
         env:
           MAVEN_USERNAME: ${{ secrets.OSSRH_USERNAME }}
